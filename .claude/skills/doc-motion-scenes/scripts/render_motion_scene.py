@@ -225,7 +225,7 @@ def render_motion_contact_sheets(records: list[dict], motion_dir: str, max_rows_
     total_batches = (len(records) + max_rows_per_sheet - 1) // max_rows_per_sheet
     out_paths = []
     sheet_w = 1860
-    row_h = 300
+    row_h = 322
     pad_top = 64
 
     for b_idx in range(total_batches):
@@ -250,7 +250,8 @@ def render_motion_contact_sheets(records: list[dict], motion_dir: str, max_rows_
             thumb_w, thumb_h = 432, 232
             for c_i in range(4):
                 tx = 30 + c_i * (thumb_w + 18)
-                ty = y0 + 44
+                ty = y0 + 64
+                draw.text((tx + 4, y0 + 42), labels[c_i], fill=(203, 213, 225), font=font_sub)
                 if c_i < len(frames) and frames[c_i]:
                     with Image.open(io.BytesIO(frames[c_i])) as im:
                         th = ImageOps.contain(im.convert("RGB"), (thumb_w, thumb_h), Image.Resampling.LANCZOS)
@@ -260,8 +261,6 @@ def render_motion_contact_sheets(records: list[dict], motion_dir: str, max_rows_
                         canvas.paste(th, (paste_x, paste_y))
                 else:
                     draw.rectangle([tx, ty, tx + thumb_w, ty + thumb_h], fill=(35, 20, 20), outline=(180, 60, 60), width=2)
-                draw.rectangle([tx + 6, ty + 6, tx + 136, ty + 27], fill=(12, 16, 23))
-                draw.text((tx + 11, ty + 8), labels[c_i], fill=(226, 232, 240), font=font_sub)
 
         fname = "motion_contact_sheet.jpg" if b_idx == 0 else f"motion_contact_sheet_batch_{b_idx + 1}.jpg"
         out_p = os.path.join(motion_dir, fname)

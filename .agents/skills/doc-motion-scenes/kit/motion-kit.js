@@ -1165,12 +1165,12 @@
       }
     });
 
-    // Top persistent editorial header banner
+    // Top persistent editorial header banner (safe action-title margin)
     if (opts.kicker || opts.headline) {
       const hdr = htmlEl('div', {
         position: 'absolute',
-        left: '78px',
-        top: '56px',
+        left: '96px',
+        top: '78px',
         padding: '16px 26px',
         background: pal.isLight ? 'rgba(255,253,248,0.90)' : 'rgba(15,23,42,0.86)',
         borderLeft: `5px solid ${pal.accent}`,
@@ -1362,13 +1362,15 @@
         transform: `translateY(${((1 - cProg) * 26).toFixed(1)}px)`,
       }, stage);
 
-      const rowLbl = htmlEl('div', { display: 'flex', justifyContent: 'space-between', marginBottom: '14px', alignItems: 'baseline' }, cBox);
-      htmlEl('span', { fontSize: '24px', fontWeight: '700', color: pal.ink }, rowLbl, opts.contrastLabel);
+      const rowLbl = htmlEl('div', { display: 'flex', justifyContent: 'space-between', gap: '36px', marginBottom: '16px', alignItems: 'center' }, cBox);
+      htmlEl('span', { fontSize: '22px', fontWeight: '700', lineHeight: '1.3', color: pal.ink, flex: '1 1 auto', maxWidth: '1080px' }, rowLbl, opts.contrastLabel);
       htmlEl('span', {
         fontFamily: "'JetBrains Mono', monospace",
-        fontSize: '30px',
+        fontSize: '28px',
         fontWeight: '900',
         color: pal.accent2,
+        flexShrink: '0',
+        whiteSpace: 'nowrap',
       }, rowLbl, opts.contrastValue || '');
 
       const track = htmlEl('div', {
@@ -1797,28 +1799,29 @@
     const nodeMap = {};
     opts.nodes.forEach((n) => { nodeMap[n.id] = n; });
 
-    // Header text in SVG
+    // Header text in SVG (pinned outside gWorld scale drift so top margin never clips!)
     if (opts.kicker) {
       const kt = svgEl('text', {
-        x: 96,
-        y: 86,
+        x: 104,
+        y: 104,
         fill: pal.accent,
         'font-family': "'JetBrains Mono', monospace",
         'font-size': '17',
         'font-weight': '800',
         'letter-spacing': '2.6',
-      }, gWorld);
+      }, svgRoot);
       kt.textContent = opts.kicker.toUpperCase();
     }
     if (opts.headline) {
+      const hFont = opts.headline.length > 48 ? 40 : 46;
       const ht = svgEl('text', {
-        x: 96,
-        y: 142,
+        x: 104,
+        y: 158,
         fill: pal.ink,
         'font-family': "'Space Grotesk', system-ui, sans-serif",
-        'font-size': '46',
+        'font-size': String(hFont),
         'font-weight': '800',
-      }, gWorld);
+      }, svgRoot);
       ht.textContent = opts.headline;
     }
 
@@ -2125,15 +2128,29 @@
       st.textContent = opts.bigStat;
     }
     if (opts.subheadline) {
-      const sub = svgEl('text', {
-        x: 108,
-        y: 295 + lines.length * 66 + 132,
-        fill: pal.muted,
-        'font-family': "'Plus Jakarta Sans', system-ui, sans-serif",
-        'font-size': '25',
-        'font-weight': '600',
-      }, gText);
-      sub.textContent = opts.subheadline;
+      const words = String(opts.subheadline).split(/\s+/).filter(Boolean);
+      const subLines = [];
+      let cur = '';
+      words.forEach((w) => {
+        if (cur && (cur.length + 1 + w.length) > 42) {
+          subLines.append ? subLines.append(cur) : subLines.push(cur);
+          cur = w;
+        } else {
+          cur = cur ? `${cur} ${w}` : w;
+        }
+      });
+      if (cur) subLines.push(cur);
+      subLines.slice(0, 4).forEach((sln, sIdx) => {
+        const sub = svgEl('text', {
+          x: 108,
+          y: 295 + lines.length * 66 + 134 + sIdx * 34,
+          fill: pal.muted,
+          'font-family': "'Space Grotesk', system-ui, sans-serif",
+          'font-size': '24',
+          'font-weight': '600',
+        }, gText);
+        sub.textContent = sln;
+      });
     }
 
     // Right 10x10 (100-unit) proportional grid with continuous wave breathing
