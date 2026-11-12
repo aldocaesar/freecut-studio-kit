@@ -25,8 +25,9 @@ Write-Host "====================================================================
 
 function Ensure-WingetTool {
     param([string]$Cmd, [string]$WingetId, [string]$Label)
-    if (Get-Command $Cmd -ErrorAction SilentlyContinue) {
-        Write-Host "  [OK] $Label found: $((Get-Command $Cmd).Source)" -ForegroundColor Green
+    $found = Get-Command $Cmd -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
+    if ($found) {
+        Write-Host "  [OK] $Label found: $($found.Source)" -ForegroundColor Green
         return
     }
     Write-Host "  [INSTALL] $Label missing -> installing via winget ($WingetId)..." -ForegroundColor Yellow
@@ -34,8 +35,9 @@ function Ensure-WingetTool {
         throw "$Label is not installed and 'winget' is unavailable. Please install $Label manually."
     }
     winget install --id $WingetId -e --accept-package-agreements --accept-source-agreements
-    # Refresh PATH for current session
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    # Refresh PATH for current session (including WinGet\Links and newly installed Python/Node/Git)
+    $wgLinks = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + $wgLinks
 }
 
 Write-Host "`n[1/5] Checking System Binaries (Python, FFmpeg, Node.js, Git)..." -ForegroundColor Cyan
