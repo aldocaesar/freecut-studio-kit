@@ -1,34 +1,34 @@
-# FreeCut Universal Studio Kit (v6.4)
+# FreeCut Universal Studio Kit (v7.0 Final)
 
 Transforma **qualquer IA multimodal (OpenBot, Claude Code, Gemini / Antigravity ou Codex / Cursor)** em um **Editor de Vídeo Sênior e Diretor de Arte autônomo** para o [FreeCut (`walterlow/freecut` v15)](https://github.com/walterlow/freecut), atendendo qualquer formato (`16:9`, `9:16`, `4:5`, `1:1`) e vídeos curtos ou longos (**10 a 20+ minutos sem estourar janela de contexto**), **100% gratuito e sem chaves pagas obrigatórias**.
 
 ---
 
-## Como Funciona para Quem Recebe o Link do Bot no OpenBot
-
-1. **Instale o bot em 1 clique pelo link compartilhável do OpenBot (`https://openbot.run/agents/...`)**:
-   - O link instala o perfil do **`Editor-FreeCut`** e as 4 skills (`doc-art-director`, `freecut-unified-engine`, `doc-motion-scenes`, `doc-lottie-overlays`) com **zero credenciais de terceiros**.
-2. **Mande só o áudio (ou vídeo / roteiro) direto no chat**:
-   - **Na 1ª execução** (funciona até em PC recém-formatado sem Python ou Git!), o bot baixa automaticamente este repositório (`https://github.com/aldocaesar/freecut-studio-kit`) via PowerShell/`curl`, sincroniza `AGENTS.md`, `CLAUDE.md`, `.agents/skills` e `.claude/skills`, e roda `bootstrap_env.py` / `install.ps1` / `install.sh` (instalando Python, FFmpeg, `faster-whisper`, `rembg`, `edge-tts`, o atlas cartográfico Natural Earth de 242 países e o Chromium headless).
-   - Pergunta **uma única vez** se você quer cadastrar chaves opcionais (`GROQ_API_KEY`, `PEXELS_API_KEY`, `ELEVENLABS_API_KEY`) no seu cofre local ou **seguir 100% grátis** (você pode pular e adicionar chaves depois a qualquer momento apenas pedindo no chat).
-   - **Edição Criativa Automática:** mesmo que você mande apenas o arquivo de áudio sem instruções de cenas, o bot analisa cada palavra falada e dirige um projeto completo variando B-roll real, recortes PNG sem fundo em 3 estilos editoriais, mapas/gráficos animados em 30fps e animações nativas do FreeCut.
-3. **Abra o projeto pronto no FreeCut**:
-   - Por padrão, o bot monta e valida o projeto (`validate_freecut.py` = `PASS`) sem travar seu PC renderizando `.mp4` à toa, e entrega imediatamente o caminho e o link clicável (`file:///...`) da pasta **`freecut_workspace`**.
-   - Abra o **FreeCut** (no navegador ou pedindo ao bot para instalar localmente com `--with-freecut-ui ./freecut-app`), clique em **Open Workspace Folder**, selecione a pasta `freecut_workspace` e edite ou exporte o `.mp4` em 1 clique!
+## Novidades da Versão Definitiva (`v7.0 Final`)
+- **Zero Vídeo Congelado + Sub-Beats Compostos (`<= 5.8s–6.2s` por corte):** `fetch_media.py` prioriza clipes longos e baixa automaticamente ângulos secundários (`_b2.mp4` / `_b3.mp4`); `assemble_freecut.py` **jamais** emite `durationInFrames > sourceDuration` e subdivide cenas longas em 2–3 sub-planos dinâmicos.
+- **10 Motores Declarativos `MotionKit v7.0` + 8 Paletas Editoriais + Detector de Cauda Viva (`94%`):** Atlas geodésico 2D, Globo 3D ortográfico, Jornada Espacial 2.5D (estilo Vox), Curva com câmera `followTip`, Odômetro Mecânico com barra de contraste, Feed 3D de Stories/UI ao vivo, Mesa Investigativa de Dossiê com carimbo, Grafo de Fluxo Financeiro com pacotes em trânsito, Split Diagonal *Versus* e Matriz Proporcional de 100 blocos — alternando paletas claras, quentes e escuras com animação viva até o último frame.
+- **Design Editorial Desviciado:** Auto-ajuste óptico de palavras monumentais completas (zero palavras cortadas como `"VIRGÍNI"`), recortes PNG alternando esquerda/centro/direita, **5 tratamentos rotativos de imprensa** (máximo de 2 marca-textos amarelos ancorados via RapidOCR a cada 10 min), **35% de respiro visual limpo**, roteamento de texto em **6 zonas negativas** fugindo do rosto/sujeito e mix de cortes secos (`~38%`) com 5 transições cinematográficas.
+- **Blindagem Bytecode-Clean (`-B` / `dont_write_bytecode`):** Mantém `.agents/skills` 100% limpo para compartilhamento em 1 clique no botão **Publicar agente** do OpenBot.
 
 ---
 
-## Instalação Manual / Fora do OpenBot (Windows, macOS e Linux)
+## Como Funciona no OpenBot ou Fora Dele
 
-### Windows (PowerShell)
+### 1. Pelo Link Compartilhável do OpenBot
+1. Instale o **`Editor-FreeCut`** pelo link do OpenBot (`doc-art-director`, `freecut-unified-engine`, `doc-motion-scenes`, `doc-lottie-overlays` já vêm instaladas com zero chaves expostas).
+2. Envie apenas o áudio, pasta (com áudio e eventual `.srt`), vídeo de câmera ou roteiro. Na 1ª execução em PC virgem, ele baixa este kit automaticamente, configura as dependências gratuitas e pergunta uma única vez se deseja rodar 100% grátis ou conectar chaves opcionais.
+3. Abra a pasta **`freecut_workspace`** gerada diretamente em **Open Workspace Folder** no FreeCut!
+
+### 2. Instalação Manual (Windows, macOS e Linux)
+
+#### Windows (PowerShell)
 ```powershell
 git clone https://github.com/aldocaesar/freecut-studio-kit.git
 cd freecut-studio-kit
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
-*(Adicione `-InstallFreeCutApp` se também quiser baixar e configurar o editor web do FreeCut localmente com atalho `.\start-freecut.ps1`.)*
 
-### macOS / Linux (Terminal)
+#### macOS / Linux (Terminal)
 ```bash
 git clone https://github.com/aldocaesar/freecut-studio-kit.git
 cd freecut-studio-kit
@@ -38,13 +38,11 @@ chmod +x install.sh
 
 ---
 
-## O Que Está Incluso no Kit (v6.4)
+## Arquitetura dos 4 Módulos (`v7.0 Final`)
 
-| Módulo / Skill | O que faz automaticamente | Custo / Chave |
+| Módulo / Skill | Responsabilidade | Custo / Chave |
 |---|---|---|
-| **`freecut-unified-engine`** | Auto-setup em PC virgem + gravação de `.freecut-setup-done.json` após o 1º onboarding, índice enxuto `words_compact.txt` (~90% menos tokens em áudios longos), narração neural (`edge-tts`), corte A-roll (`cut_aroll.py`), caça paralela Zero-API (Bing/News/Wikimedia/Openverse/Yandex) ou c/ `PEXELS_API_KEY` opcional + recorte `rembg`, Vision QA isolado em subagente e finalizador 4-em-1 `finish_freecut.py` | **100% Grátis** |
-| **`doc-art-director`** | Edição criativa autônoma a partir só do áudio ou pasta, schema inline enxuto (sem precisar ler `.py`), decupagem sincronizada na palavra (`anchor_word`), zonas seguras (`16:9`, `9:16`, `4:5`, `1:1`), tipografia multi-fonte (`textSpans`), `textMotion` + `motionModifiers` e 3 arquétipos de recorte sem repetição | **100% Grátis** |
-| **`doc-motion-scenes`** | Cenas de Motion Graphics em 30fps renderizadas em paralelo (`ThreadPoolExecutor(max_workers=3)` com cache incremental) + geração automática de `motion/motion_contact_sheet.jpg`, cartografia geodésica real de **242 países** (`world-atlas.js` offline + MapLibre GL) e gráficos sem colisão | **100% Grátis** |
-| **`doc-lottie-overlays`** | Geração em lote (`--project-dir` em `< 0.2s`) de overlays vetoriais Bodymovin/Lottie (`<15 KB`: grifo marca-texto, setas, lower-thirds, cantoneiras de foco) sincronizados na fala + kit completo de SFX foley | **100% Grátis** |
-
-Consulte também o guia detalhado em [`COMO-USAR-E-COMPARTILHAR.md`](./COMO-USAR-E-COMPARTILHAR.md).
+| **`freecut-unified-engine`** | Auto-setup em PC virgem, `words_compact.txt`, narração neural (`edge-tts`), corte A-roll, caça paralela multi-ângulo (`_b2.mp4`), montagem multi-plano zero-freeze, 5 tratamentos de imprensa, 6 zonas tipográficas e `validate_freecut.py` v7.0 | **100% Grátis** |
+| **`doc-art-director`** | Direção criativa autônoma a partir só do áudio ou pasta, ritmo com ~35% de respiro visual, rotação de arquétipos sem repetição e schema enxuto | **100% Grátis** |
+| **`doc-motion-scenes`** | 10 motores `MotionKit v7.0` + 8 paletas editoriais + cartografia Natural Earth offline de **242 países** + render paralelo 30fps com `motion_contact_sheet.jpg` de 4 colunas (`20%/50%/78%/94%`) | **100% Grátis** |
+| **`doc-lottie-overlays`** | Geração em lote (`< 0.2s`) de overlays vetoriais Bodymovin/Lottie (`<15 KB`: cantoneiras de foco, sublinhado a tinta, setas, círculos e grifo OCR controlado) + SFX foley | **100% Grátis** |

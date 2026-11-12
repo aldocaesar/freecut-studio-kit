@@ -1,36 +1,83 @@
 #!/usr/bin/env python3
 """
-validate_freecut.py (v6.0 — Strict Schema v15 + Anti-Vício Editorial Auditor)
-=============================================================================
+validate_freecut.py (v7.0 — Strict Schema v15 + Zero-Freeze & Anti-Vício Editorial Auditor)
+===========================================================================================
 Audits `<project_dir>/freecut_workspace` AND `<project_dir>` editorial artifacts
-against BOTH `walterlow/freecut` schemaVersion 15 AND human-editing quality gates:
+against BOTH `walterlow/freecut` schemaVersion 15 AND v7.0 human-editing quality gates:
   1. Multi-format canvas (`1920x1080`, `1080x1920`, `1080x1350`, `1080x1080`) @ 30fps.
   2. Zero `FREECUT-card` or `shape` box overlays.
-  3. Exact frame/second units (`video` integer frames, `audio` float seconds, SFX <= -15 dB).
-  4. Anti-Vício Gate 1: Boxed/split slides (`split_editorial_slide` / `editorial_backdrop_frame`)
-     MUST NOT exceed 20% of scenes (prevents repetitive "photo left + text right" slideshows!).
-  5. Anti-Vício Gate 2: Motion map scenes (`motion/*.html`) MUST use real GeoJSON cartography
-     (`world-atlas.js` / `renderWorldAtlas` or `maplibregl`) — hand-drawn fake continent polygons FAIL!
-  6. Every referenced `mediaId` exists on disk with non-zero bytes.
+  3. HARD ZERO-FREEZE GATE: `durationInFrames <= (sourceEnd - sourceStart) <= sourceDuration`
+     on 100% of `video` clips (zero frozen tail frames!).
+  4. SUB-SHOT PACING GATE: Single B-roll / Ken Burns clip `<= 6.8s` (`204f` @ 30fps).
+  5. MONUMENTAL WORD GATE: Zero bare 1–3 digit fragments (`'2'`, `'13'`) and optical width fit.
+  6. PRESS HIGHLIGHTER CAP: Max `2` yellow `marker` Lotties per 10 minutes of timeline.
+  7. TYPOGRAPHY ZONE DIVERSITY: Max `32%` of `_callout` texts in a single `(x, y)` coordinate.
+  8. MOTION ANTI-CLONE GATE: Real GeoJSON maps, `<= 25%` motion cutouts, `>= 40%` light/warm/colored
+     motion palettes, and zero consecutive identical `MotionKit.render*` engines.
 """
 import argparse
+import collections
 import glob
 import json
+import math
 import os
 import re
 import sys
 
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 VALID_RESOLUTIONS = {(1920, 1080), (1080, 1920), (1080, 1350), (1080, 1080)}
 MAP_KEYWORDS = ("equador", "equator", "africa", "áfrica", "américa", "america", "oceano", "atlantic", "continent", "mapa", "world map")
+LIGHT_PALETTE_MARKERS = (
+    "warm_archive_paper",
+    "editorial_blush_ivory",
+    "swiss_emerald_ivory",
+    "newsprint_crimson_ink",
+    "terracotta_ochre_sand",
+    "#f4ede1",
+    "#fbf3f1",
+    "#f1f6f3",
+    "#eeeae2",
+    "#f2e5d5",
+    "#f6f2e8",
+    "#faf8f4",
+    "#fffdf8",
+)
 
 
-def audit_motion_maps(project_dir: str, errors: list):
+def _detect_motion_engine(raw_html: str) -> str:
+    m = re.search(
+        r"MotionKit\.(renderWorldAtlas|renderDataCurve|renderCameraJourney|renderOdometerCounter|renderUIFeed3D|renderDossierDesk|renderNetworkGraph|renderVersusSplit|renderWaffleScale|renderKineticManifesto)",
+        raw_html,
+    )
+    if m:
+        eng = m.group(1)
+        if eng == "renderWorldAtlas" and "orthographic" in raw_html:
+            return "renderWorldAtlas:orthographic"
+        return eng
+    return "custom_dom"
+
+
+def audit_motion_scenes_v7(project_dir: str, errors: list, stats: dict):
     motion_dir = os.path.join(project_dir, "motion")
     if not os.path.isdir(motion_dir):
         return
-    for html_p in sorted(glob.glob(os.path.join(motion_dir, "*.html"))):
+    html_files = sorted(glob.glob(os.path.join(motion_dir, "*.html")))
+    stats["motion_htmls"] = len(html_files)
+    if not html_files:
+        return
+
+    cutout_motions = 0
+    light_motions = 0
+    prev_engine = None
+    prev_file = None
+
+    for html_p in html_files:
+        bname = os.path.basename(html_p)
         raw = open(html_p, "r", encoding="utf-8", errors="ignore").read()
         low = raw.lower()
+
         uses_real_gis = (
             "world-atlas.js" in low
             or "world_atlas_geojson" in low
@@ -38,13 +85,41 @@ def audit_motion_maps(project_dir: str, errors: list):
             or "maplibregl" in low
             or "d3.geo" in low
         )
-        if uses_real_gis:
-            continue
-        # Detect hand-coded polygon continent blobs in map scenes
-        if any(k in low for k in MAP_KEYWORDS) and re.search(r"<path[^>]+d=['\"]M\s*\d+[,\s]+\d+\s+L\s*\d+", raw):
+        if not uses_real_gis and any(k in low for k in MAP_KEYWORDS) and re.search(r"<path[^>]+d=['\"]M\s*\d+[,\s]+\d+\s+L\s*\d+", raw):
             errors.append(
-                f"Anti-Vício Map Failure in {os.path.basename(html_p)}: hand-coded SVG polygon map detected! "
+                f"Anti-Vício Map Failure in {bname}: hand-coded SVG polygon map detected! "
                 "Use `world-atlas.js` + `MotionKit.renderWorldAtlas(...)` or `maplibregl`."
+            )
+
+        if "_cutout.png" in low or 'id="subject"' in low or "class=\"cutout" in low:
+            cutout_motions += 1
+
+        if any(tok in low for tok in LIGHT_PALETTE_MARKERS):
+            light_motions += 1
+
+        eng = _detect_motion_engine(raw)
+        if eng != "custom_dom" and eng == prev_engine:
+            errors.append(
+                f"Anti-Vício Consecutive Motion Clone: {prev_file} and {bname} both use `{eng}` back-to-back!"
+            )
+        prev_engine = eng
+        prev_file = bname
+
+    stats["motion_light_palettes"] = light_motions
+    stats["motion_cutouts"] = cutout_motions
+
+    if len(html_files) >= 4:
+        max_cut = max(2, int(math.floor(len(html_files) * 0.25)))
+        if cutout_motions > max_cut:
+            errors.append(
+                f"Anti-Vício Motion Cutout Overuse: {cutout_motions}/{len(html_files)} motion scenes contain subject cutouts "
+                f"(max allowed={max_cut}, <=25% rule)."
+            )
+        min_light = int(math.ceil(len(html_files) * 0.40))
+        if light_motions < min_light:
+            errors.append(
+                f"Anti-Vício Dark Motion Monotony: only {light_motions}/{len(html_files)} motion scenes use light/warm/editorial palettes "
+                f"(need >={min_light}). Rotate `MotionKit.PALETTES`!"
             )
 
 
@@ -56,13 +131,16 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         "images": 0,
         "cutouts": 0,
         "texts": 0,
+        "callouts": 0,
         "lotties": 0,
+        "marker_lotties": 0,
         "adjustments": 0,
         "sfx": 0,
         "transitions": 0,
         "fonts": 0,
         "text_motions": 0,
         "motion_modifiers": 0,
+        "frozen_videos": 0,
     }
 
     idx_path = os.path.join(ws_dir, "index.json")
@@ -85,6 +163,7 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
 
     meta = proj.get("metadata", {})
     w, h = meta.get("width"), meta.get("height")
+    fps = int(meta.get("fps") or 30)
     if (w, h) not in VALID_RESOLUTIONS:
         errors.append(f"Invalid canvas resolution: {w}x{h} (expected one of {sorted(VALID_RESOLUTIONS)})")
 
@@ -99,8 +178,10 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
     half_h = (h or 1080) * 0.5
     boxed_slides = 0
     anchor_clips = 0
+    max_end_frame = 0
     used_fonts = set()
     cutout_archetypes = []
+    callout_coords = collections.Counter()
 
     item_ids = set()
     item_dur_map = {}
@@ -108,7 +189,10 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
     for it in items:
         iid = it.get("id")
         item_ids.add(iid)
-        item_dur_map[iid] = int(it.get("durationInFrames", 0))
+        dur_f = int(it.get("durationInFrames", 0))
+        from_f = int(it.get("from", 0))
+        max_end_frame = max(max_end_frame, from_f + dur_f)
+        item_dur_map[iid] = dur_f
         itype = it.get("type")
         tid = it.get("trackId", "")
         lbl = str(it.get("label", ""))
@@ -119,12 +203,17 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
 
         if tid == "track_anchor":
             anchor_clips += 1
+            # v7.0 Sub-Shot Pacing Gate: single B-roll / Ken Burns clip must not exceed 6.8s (204 frames @ 30fps)
+            if ("_broll" in lbl or "_cinematic_broll" in lbl or "_ken_burns" in lbl) and dur_f > int(fps * 6.8):
+                errors.append(
+                    f"Single Media Shot Overrun on {lbl}: {dur_f}f ({dur_f/fps:.2f}s > 6.8s cap). Subdivide into 2–3 sub-shots!"
+                )
         if "_split_media" in lbl or "_framed_subject" in lbl:
             boxed_slides += 1
         if tid == "track_fg_2" and itype == "image":
             stats["cutouts"] += 1
             if "_cutout_" in lbl:
-                cutout_archetypes.append((it.get("from", 0), lbl.split("_cutout_", 1)[1]))
+                cutout_archetypes.append((from_f, lbl.split("_cutout_", 1)[1]))
 
         if "FREECUT-card" in lbl or itype == "shape":
             errors.append(f"Banned box/card item detected: {lbl} ({itype})")
@@ -149,6 +238,14 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
             for k in ("sourceStart", "sourceEnd", "sourceDuration"):
                 if not isinstance(it.get(k), int):
                     errors.append(f"Video {lbl} property '{k}' must be int frames, got {type(it.get(k)).__name__}")
+            if all(isinstance(it.get(k), int) for k in ("sourceStart", "sourceEnd", "sourceDuration")):
+                ss, se, sd = it["sourceStart"], it["sourceEnd"], it["sourceDuration"]
+                avail_span = se - ss
+                if dur_f > avail_span or se > sd or dur_f > sd:
+                    stats["frozen_videos"] += 1
+                    errors.append(
+                        f"VIDEO_FREEZE_OVERRUN on {lbl}: durationInFrames={dur_f} exceeds video span [{ss}..{se}] (sourceDuration={sd})!"
+                    )
             if it.get("volume", 0.0) != 0.0:
                 errors.append(f"Video {lbl} must have volume=0.0 (muted against VO)")
 
@@ -157,6 +254,8 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
 
         elif itype == "lottie":
             stats["lotties"] += 1
+            if "marker" in lbl.lower():
+                stats["marker_lotties"] += 1
             if not isinstance(it.get("frameRate"), int) or not isinstance(it.get("totalFrames"), int):
                 errors.append(f"Lottie {lbl} must define integer 'frameRate' and 'totalFrames'")
 
@@ -203,6 +302,37 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
                 errors.append(f"Text '{txt[:24]}' overflows horizontal canvas (x={tx}, w={tw}, canvas={w})")
             if abs(ty) > half_h - 30:
                 errors.append(f"Text '{txt[:24]}' too close to top/bottom edge (y={ty}, canvas_h={h})")
+
+            # v7.0 Monumental Word Integrity Gate
+            if "_monumental_bg_type" in lbl:
+                compact_mon = txt.replace(" ", "")
+                if compact_mon.isdigit() and len(compact_mon) < 4:
+                    errors.append(f"Monumental Hero Bare Digit Error on {lbl}: '{txt}' (use 4-digit year, formatted stat, or full word)")
+                fs = int(it.get("fontSize", 200))
+                if fs * len(txt) * 0.52 > tw * 1.18:
+                    errors.append(f"Monumental Hero Clipping Risk on {lbl}: '{txt}' @ {fs}px exceeds box width {tw}px")
+
+            if "_callout" in lbl:
+                stats["callouts"] += 1
+                callout_coords[(int(tx), int(ty))] += 1
+
+    # v7.0 Press Highlighter Cap (`<= 2` yellow marker Lotties per 10 minutes)
+    timeline_minutes = max(1.0, (max_end_frame / float(fps)) / 60.0)
+    max_markers_allowed = max(2, int(math.ceil((timeline_minutes / 10.0) * 2.0)))
+    if stats["marker_lotties"] > max_markers_allowed:
+        errors.append(
+            f"Anti-Vício Marker Highlighter Spam: {stats['marker_lotties']} yellow marker overlays used "
+            f"(max allowed={max_markers_allowed} for {timeline_minutes:.1f} min). Rotate the 5 press treatments!"
+        )
+
+    # v7.0 Callout Zone Diversity Gate (`<= 32%` in any single `(x, y)` coordinate)
+    if stats["callouts"] >= 8:
+        top_coord, top_cnt = callout_coords.most_common(1)[0]
+        share = top_cnt / float(stats["callouts"])
+        if share > 0.32:
+            errors.append(
+                f"Anti-Vício Callout Corner Monotony: {top_cnt}/{stats['callouts']} ({share*100:.1f}%) callouts stuck at {top_coord} (max 32%)!"
+            )
 
     stats["fonts"] = len(used_fonts)
     if anchor_clips >= 6 and len(used_fonts) < 3:
@@ -253,7 +383,7 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
             errors.append(f"Transition {tr.get('id')} references non-existent clip ID")
 
     parent_proj_dir = os.path.dirname(os.path.abspath(ws_dir))
-    audit_motion_maps(parent_proj_dir, errors)
+    audit_motion_scenes_v7(parent_proj_dir, errors, stats)
 
     return len(errors) == 0, errors, stats
 
@@ -269,12 +399,12 @@ def main():
         ap.error("Provide --workspace or --project-dir")
 
     ok, errors, stats = validate_workspace(ws)
-    print(f"[validate_freecut v6] Stats: {json.dumps(stats)}")
+    print(f"[validate_freecut v7] Stats: {json.dumps(stats)}")
     if ok:
-        print("[validate_freecut v6] PASS — 0 schema or editorial anti-vício errors! Ready to open & render in FreeCut.")
+        print("[validate_freecut v7] PASS — 0 schema, freeze, or editorial anti-vício errors! Ready to open & render in FreeCut.")
         sys.exit(0)
     else:
-        print(f"[validate_freecut v6] FAIL — {len(errors)} error(s):")
+        print(f"[validate_freecut v7] FAIL — {len(errors)} error(s):")
         for e in errors:
             print(f"  - {e}")
         sys.exit(1)

@@ -15,6 +15,10 @@ Supported `--kind` presets:
 import argparse
 import json
 import os
+import sys
+
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
 def hex_to_rgb01(hex_str: str):
@@ -561,7 +565,7 @@ def _build_preset_json(kind: str, dur_frames: int, accent: str, bg: str) -> dict
 
 def _infer_kind_from_path(file_path: str, layout: str = "") -> str:
     low = os.path.basename(file_path).lower()
-    if "marker" in low or "highlight" in low or layout == "press_evidence_highlight":
+    if "marker" in low or "highlight" in low:
         return "marker_highlight"
     if "arrow" in low or "pointer" in low:
         return "pointer_arrow"

@@ -15,6 +15,9 @@ import site
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 _HERE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ALT_SCRIPTS = os.path.join(_HERE_DIR, ".agents", "skills", "freecut-unified-engine", "scripts")
 for _d in (_HERE_DIR, _ALT_SCRIPTS):

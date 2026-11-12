@@ -28,6 +28,9 @@ import threading
 import time
 import urllib.parse
 
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
@@ -603,6 +606,26 @@ def search_stock_images(query: str, keys: dict, aspect_ratio: str = "16:9") -> l
 
 # ── Video Fetchers (Stock HD + YouTube Specific Excerpt via yt-dlp) ───────
 
+def probe_video_duration_s(video_path: str) -> float:
+    """Returns exact MP4 duration in seconds via ffprobe (0.0 on error)."""
+    if not os.path.isfile(video_path):
+        return 0.0
+    try:
+        res = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", video_path,
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return float((res.stdout or "0").strip() or 0.0)
+    except Exception:
+        return 0.0
+
+
 def normalize_video_for_freecut(raw_mp4: str, out_mp4: str, target_dur_s: float, aspect_ratio: str = "16:9") -> bool:
     """Normalizes any video to silent target aspect @ 30fps, -g 30 keyframe-aligned H.264 for buttery FreeCut scrubbing."""
     try:
@@ -611,7 +634,7 @@ def normalize_video_for_freecut(raw_mp4: str, out_mp4: str, target_dur_s: float,
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-i", raw_mp4,
-            "-t", f"{max(3.5, target_dur_s + 1.2):.2f}",
+            "-t", f"{max(6.5, target_dur_s + 2.5):.2f}",
             "-map_metadata", "-1",
             "-an",
             "-vf", f"scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},fps=30,format=yuv420p",
@@ -620,7 +643,7 @@ def normalize_video_for_freecut(raw_mp4: str, out_mp4: str, target_dur_s: float,
             "-movflags", "+faststart",
             out_mp4,
         ]
-        subprocess.run(cmd, check=True, timeout=65)
+        subprocess.run(cmd, stdin=subprocess.DEVNULL, check=True, timeout=65)
         return os.path.isfile(out_mp4) and os.path.getsize(out_mp4) > 15000
     except Exception:
         return False
@@ -679,16 +702,25 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
     urls = []
     orient = _orientation_for_aspect(aspect_ratio)
     target_w = ASPECT_DIMS.get(aspect_ratio, (1920, 1080))[0]
+    min_pref_dur = max(5.5, min(14.0, dur_s + 0.8))
     if keys.get("PEXELS_API_KEY"):
         try:
             r = requests.get(
                 "https://api.pexels.com/videos/search",
                 headers={"Authorization": keys["PEXELS_API_KEY"]},
-                params={"query": query, "per_page": 8, "orientation": orient},
+                params={"query": query, "per_page": 14, "orientation": orient},
                 timeout=9,
             )
             if r.ok:
-                for vid in r.json().get("videos", []):
+                vids = r.json().get("videos", [])
+                # Sort so clips >= min_pref_dur come first (prevents 5s clips in 12s beats!)
+                vids_sorted = sorted(
+                    vids,
+                    key=lambda v: (0 if float(v.get("duration") or 0) >= min_pref_dur else 1, -min(20.0, float(v.get("duration") or 0))),
+                )
+                for vid in vids_sorted:
+                    if float(vid.get("duration") or 0) < 3.8:
+                        continue
                     vfs = sorted(
                         [vf for vf in vid.get("video_files", []) if 720 <= max(vf.get("width", 0), vf.get("height", 0)) <= 2560],
                         key=lambda x: abs(x.get("width", target_w) - target_w),
@@ -702,11 +734,15 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
         try:
             r = requests.get(
                 "https://pixabay.com/api/videos/",
-                params={"key": keys["PIXABAY_API_KEY"], "q": query, "per_page": 8},
+                params={"key": keys["PIXABAY_API_KEY"], "q": query, "per_page": 12},
                 timeout=9,
             )
             if r.ok:
-                for hit in r.json().get("hits", []):
+                hits = sorted(
+                    r.json().get("hits", []),
+                    key=lambda h: (0 if float(h.get("duration") or 0) >= min_pref_dur else 1, -min(20.0, float(h.get("duration") or 0))),
+                )
+                for hit in hits:
                     for tier in ("large", "medium"):
                         u = hit.get("videos", {}).get(tier, {}).get("url", "")
                         if u:
@@ -1361,18 +1397,52 @@ def process_scene(scene: dict, project_dir: str, keys: dict, aspect_ratio: str =
     os.makedirs(raw_dir, exist_ok=True)
     os.makedirs(vid_dir, exist_ok=True)
 
-    # 1. Video path (if requested)
+    # 1. Video path (if requested) — v7.0 Zero-Freeze + Multi-Shot B-Roll (`{sid}_b2.mp4` / `{sid}_b3.mp4`)
     if source_type == "video":
         out_mp4 = os.path.join(vid_dir, f"{sid}.mp4")
         raw_mp4 = os.path.join(raw_dir, f"{sid}_raw.mp4")
-        for q in queries:
+        for q_idx, q in enumerate(queries):
             src_hit = (
                 fetch_specific_youtube_clip(q, raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
                 if specific
                 else fetch_ambient_stock_video(q, keys, raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
             )
             if src_hit:
-                vframes = extract_video_preview_frames(out_mp4, sid, project_dir, dur_s)
+                d1 = probe_video_duration_s(out_mp4)
+                extra_clips = []
+                # Whenever beat > 5.8s or primary clip is shorter than beat, fetch distinct secondary B-roll angle(s)
+                need_b2 = (dur_s > 5.8) or (d1 < dur_s + 0.25)
+                if need_b2:
+                    alt_queries = queries[q_idx + 1 :] + queries[: q_idx + 1]
+                    b2_out = os.path.join(vid_dir, f"{sid}_b2.mp4")
+                    b2_raw = os.path.join(raw_dir, f"{sid}_b2_raw.mp4")
+                    sub_target = max(5.5, dur_s * 0.6)
+                    for aq in alt_queries:
+                        b2_hit = (
+                            fetch_specific_youtube_clip(f"{aq} detail", b2_raw, b2_out, sub_target, aspect_ratio=aspect_ratio)
+                            if specific
+                            else fetch_ambient_stock_video(aq, keys, b2_raw, b2_out, sub_target, aspect_ratio=aspect_ratio)
+                        )
+                        if b2_hit and os.path.isfile(b2_out):
+                            extra_clips.append(b2_out)
+                            break
+                d_sum = d1 + sum(probe_video_duration_s(p) for p in extra_clips)
+                if dur_s > 11.2 or d_sum < dur_s + 0.25:
+                    alt_queries = list(reversed(queries))
+                    b3_out = os.path.join(vid_dir, f"{sid}_b3.mp4")
+                    b3_raw = os.path.join(raw_dir, f"{sid}_b3_raw.mp4")
+                    sub_target = max(5.0, dur_s * 0.45)
+                    for aq in alt_queries:
+                        b3_hit = (
+                            fetch_specific_youtube_clip(f"{aq} closeup", b3_raw, b3_out, sub_target, aspect_ratio=aspect_ratio)
+                            if specific
+                            else fetch_ambient_stock_video(aq, keys, b3_raw, b3_out, sub_target, aspect_ratio=aspect_ratio)
+                        )
+                        if b3_hit and os.path.isfile(b3_out):
+                            extra_clips.append(b3_out)
+                            break
+
+                vframes = extract_video_preview_frames(out_mp4, sid, project_dir, min(dur_s, max(1.0, d1)))
                 return {
                     "scene_id": sid,
                     "ok": True,
@@ -1381,6 +1451,8 @@ def process_scene(scene: dict, project_dir: str, keys: dict, aspect_ratio: str =
                     "queries": queries,
                     "narration": scene.get("narration", ""),
                     "path": out_mp4,
+                    "secondary_videos": extra_clips,
+                    "duration_s": round(d1, 2),
                     "url": src_hit,
                     "source": src_hit.split(":", 1)[0] if ":" in src_hit else "video",
                     "video_frames": vframes,

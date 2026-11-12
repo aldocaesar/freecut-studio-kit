@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-assemble_freecut.py (v6.3 — Native FreeCut TextMotion, Multi-Span Editorial & 3-Archetype Cutouts)
-==================================================================================================
+assemble_freecut.py (v7.0 — Zero-Freeze Sub-Shots, Optical Hero Fit, 5 Press Treatments & 6-Zone Negative-Space Typography)
+===========================================================================================================================
 Compiles a human-grade documentary timeline directly into:
   1. `<project_dir>/freecut_workspace/` — Ready to open & render immediately in FreeCut (browser).
   2. `<project_dir>/<SafeTitle>.freecut.zip` — Portable FreeCut project bundle.
 
 Strictly follows `walterlow/freecut` schemaVersion 15 (`vcy-AGOSTO` architecture, zero `FREECUT-card` boxes):
   - Center-origin coordinates (`1920x1080`, `1080x1920`, `1080x1350`, `1080x1080`) @ 30fps.
-  - All clip-local keyframes clamped to `[0, durationInFrames - 1]` (zero trimmed out-of-clip keyframes).
-  - Native `TextMotionSpec` (`textMotion: {in, out, loop}`), `TextSpan[]` (`textSpans` multi-font lockups),
-    `MotionModifier[]` (`motionModifiers` Clipe Motion), and `LottieItem` (`frameRate`, `totalFrames`).
-  - 3 Distinct Cutout Editorial Archetypes (`poster_monumental_center`, `archival_dossier_paper`,
-    `magazine_grounded_portrait`) with automatic bottom-edge portrait grounding (zero floating chopped torsos).
+  - HARD ZERO-FREEZE INVARIANT: `durationInFrames <= sourceEnd - sourceStart <= sourceDuration` on 100% of video clips;
+    long beats (`> 6.2s`) or short B-roll MP4s auto-subdivide into 2–3 crisp sub-shots (`3.2s–5.5s` each).
+  - Optical glyph auto-scaling on monumental background words (zero `[:7]` truncation, zero bare single digits) +
+    left/center/right subject cutout staging.
+  - 5 Rotating Press Evidence Treatments (`tilted_3d_push`, `dossier_focus_brackets`, `pull_quote_editorial`,
+    `headline_underline_ink`, and RapidOCR-anchored `ocr_marker_highlight` capped at `<= 2` per 10 min).
+  - 35% Clean Visual Breathing Room + Subject-Aware 6-Zone Negative-Space Typography + Varied Transitions.
 """
 import argparse
 import glob
@@ -30,6 +32,9 @@ import uuid
 import wave
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple
+
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
@@ -677,14 +682,37 @@ def build_cutout_editorial_lockup(
     primary_raw, secondary_raw = _split_editorial_clauses(raw_hl)
     title_clean = _smart_title_case(primary_raw or hero_stat or "Destaque")
 
-    # Extract concise monumental background token (year / number / short brand stem) for Archetype 0
+    # v7.0: Extract complete, untruncated monumental background token (NEVER `[:7]` chop or bare 1-2 digit fragments!)
     bg_token = None
-    stat_source = f"{hero_stat} {raw_hl}".strip()
-    m_num = re.search(r"\b\d{4}\b|\b\d+(?:[.,]\d+)?[%BMK]?\b", stat_source)
-    if m_num:
-        bg_token = m_num.group(0)
-    elif title_clean:
-        bg_token = title_clean.split()[0].upper()[:7]
+    explicit_mon = (scene.get("monumental_word") or scene.get("hero_word") or "").strip()
+    if explicit_mon:
+        bg_token = explicit_mon.upper()
+    else:
+        stat_source = f"{hero_stat} {raw_hl}".strip()
+        m_stat = re.search(
+            r"(?:R\$|US\$|\$)\s*\d[\d.,]*\s*(?:MI|BI|MIL|M|B|MILH[ÕO]ES|BILH[ÕO]ES)?|\b(?:19|20)\d{2}\b|\b\d+(?:[.,]\d+)?\s*(?:%|MI|BI|MILH[ÕO]ES|BILH[ÕO]ES)\b",
+            stat_source,
+            flags=re.IGNORECASE,
+        )
+        if m_stat:
+            tok = re.sub(r"MILH[ÕO]ES", "MI", m_stat.group(0).upper(), flags=re.IGNORECASE)
+            tok = re.sub(r"BILH[ÕO]ES", "BI", tok, flags=re.IGNORECASE)
+            bg_token = re.sub(r"\s+", " ", tok).strip()
+        elif title_clean:
+            stop_w = {
+                "COMO", "PARA", "QUANDO", "MAIS", "ENTRE", "SOBRE", "DEPOIS", "ANTES",
+                "UMA", "UM", "DOS", "DAS", "NOS", "NAS", "PELO", "PELA", "QUE", "POR",
+                "SEU", "SUA", "SEUS", "SUAS", "FOI", "ERA", "SÃO", "THE", "WITH", "FROM",
+            }
+            words_clean = [
+                re.sub(r"^[^\wÀ-ÿ]+|[^\wÀ-ÿ]+$", "", w).upper()
+                for w in title_clean.split()
+            ]
+            substantive = [w for w in words_clean if 4 <= len(w) <= 14 and w not in stop_w and not w.isdigit()]
+            if substantive:
+                bg_token = substantive[0]
+            elif words_clean and len(words_clean[0]) >= 3 and not words_clean[0].isdigit():
+                bg_token = words_clean[0][:14]
 
     spans: List[Dict[str, Any]] = []
 
@@ -1334,6 +1362,152 @@ def add_gpu_adjustment(
     )
 
 
+_OCR_SINGLETON = [None, False]
+
+
+def _detect_visual_saliency_center(media_path: Optional[str], project_dir: str, sid: str) -> Tuple[float, float]:
+    """
+    Fast (<3ms) gradient-saliency center-of-mass in normalized [-0.5, +0.5] coordinates.
+    Routes editorial callouts into calm negative space AWAY from faces/subjects!
+    """
+    probe_img = media_path
+    if probe_img and probe_img.lower().endswith((".mp4", ".mov", ".webm")):
+        cand_thumb = os.path.join(project_dir, "media", "candidates", f"{sid}_vid_f2.jpg")
+        probe_img = cand_thumb if os.path.isfile(cand_thumb) else None
+    if not probe_img or not os.path.isfile(probe_img):
+        return 0.0, -0.05
+    try:
+        with Image.open(probe_img) as im:
+            g = np.asarray(im.convert("L").resize((128, 72)), dtype=np.float32)
+        gx = np.abs(np.diff(g, axis=1, prepend=g[:, :1]))
+        gy = np.abs(np.diff(g, axis=0, prepend=g[:1, :]))
+        sal = gx + gy
+        # Favor central/upper portrait area slightly where faces sit
+        yy, xx = np.mgrid[0:72, 0:128]
+        weight = sal * (1.15 - 0.35 * np.abs((yy / 71.0) - 0.40))
+        total = float(weight.sum())
+        if total <= 1e-3:
+            return 0.0, -0.05
+        cx = float((weight * xx).sum() / total) / 127.0 - 0.5
+        cy = float((weight * yy).sum() / total) / 71.0 - 0.5
+        return round(cx, 3), round(cy, 3)
+    except Exception:
+        return 0.0, -0.05
+
+
+def _locate_press_headline_box(img_path: str, ew: int, eh: int, print_x: int, print_y: int) -> Tuple[int, int, int, int]:
+    """
+    Uses RapidOCR (when installed) or high-contrast ink-band detection on `<sid>_print.png`
+    so `ocr_marker_highlight` sweeps over the REAL headline line instead of a blind fixed offset!
+    """
+    if not _OCR_SINGLETON[1]:
+        _OCR_SINGLETON[1] = True
+        try:
+            from rapidocr_onnxruntime import RapidOCR  # type: ignore
+            _OCR_SINGLETON[0] = RapidOCR()
+        except Exception:
+            _OCR_SINGLETON[0] = None
+
+    ocr = _OCR_SINGLETON[0]
+    if ocr is not None and os.path.isfile(img_path):
+        try:
+            with Image.open(img_path) as im:
+                iw, ih = im.size
+            res, _ = ocr(img_path)
+            if res:
+                # Pick largest-height multi-word line in upper 68% of the press print (the headline!)
+                best = None
+                best_score = -1.0
+                for box, txt, conf in res:
+                    if not txt or len(str(txt).strip()) < 10:
+                        continue
+                    xs = [p[0] for p in box]
+                    ys = [p[1] for p in box]
+                    bx0, bx1 = min(xs), max(xs)
+                    by0, by1 = min(ys), max(ys)
+                    bh = by1 - by0
+                    bw = bx1 - bx0
+                    cy_rel = ((by0 + by1) * 0.5) / max(1.0, ih)
+                    if 0.10 <= cy_rel <= 0.70 and bw >= iw * 0.24:
+                        score = bh * (1.25 if 0.16 <= cy_rel <= 0.52 else 0.85) * min(2.0, bw / (iw * 0.35))
+                        if score > best_score:
+                            best_score = score
+                            best = (bx0, by0, bw, bh, iw, ih)
+                if best is not None:
+                    bx0, by0, bw, bh, iw, ih = best
+                    cx_px = print_x + int(((bx0 + bw * 0.5) / iw - 0.5) * ew)
+                    cy_px = print_y + int(((by0 + bh * 0.5) / ih - 0.5) * eh)
+                    mw = max(280, min(int(ew * 0.86), int((bw / iw) * ew * 1.06)))
+                    mh = max(62, min(130, int((bh / ih) * eh * 1.45)))
+                    return cx_px, cy_px, mw, mh
+        except Exception:
+            pass
+
+    return print_x, print_y - int(eh * 0.14), int(ew * 0.68), 86
+
+
+def _pick_callout_zone_v7(
+    sid: str,
+    explicit_hint: Optional[str],
+    subj_xy: Tuple[float, float],
+    prev_zone: Optional[str],
+    zone_counts: Dict[str, int],
+    is_vertical: bool,
+) -> Tuple[str, int, int, int, str]:
+    """
+    Routes text callouts across 6 distinct editorial zones in landscape (or 3 in vertical),
+    avoiding the subject's saliency quadrant, banning back-to-back repeats, and balancing zone share (<=25%).
+    """
+    if is_vertical:
+        v_zones = {
+            "bottom_center": (0, int(CANVAS_H * 0.25), int(CANVAS_W * 0.84), "center"),
+            "top_center": (0, -int(CANVAS_H * 0.30), int(CANVAS_W * 0.84), "center"),
+            "mid_lower": (0, int(CANVAS_H * 0.14), int(CANVAS_W * 0.82), "center"),
+        }
+        order = ["bottom_center", "top_center", "mid_lower"]
+        if explicit_hint in v_zones and explicit_hint != prev_zone:
+            z = explicit_hint
+        else:
+            cands = [k for k in order if k != prev_zone]
+            cands.sort(key=lambda k: zone_counts.get(k, 0))
+            z = cands[0]
+        zone_counts[z] = zone_counts.get(z, 0) + 1
+        x, y, w, al = v_zones[z]
+        return z, x, y, w, al
+
+    zones = {
+        "bottom_left": (-int(CANVAS_W * 0.22), int(CANVAS_H * 0.34), int(CANVAS_W * 0.45), "left"),
+        "bottom_right": (int(CANVAS_W * 0.22), int(CANVAS_H * 0.34), int(CANVAS_W * 0.45), "right"),
+        "top_left": (-int(CANVAS_W * 0.24), -int(CANVAS_H * 0.34), int(CANVAS_W * 0.42), "left"),
+        "top_right": (int(CANVAS_W * 0.24), -int(CANVAS_H * 0.34), int(CANVAS_W * 0.42), "right"),
+        "bottom_center": (0, int(CANVAS_H * 0.36), int(CANVAS_W * 0.68), "center"),
+        "editorial_margin_left": (-int(CANVAS_W * 0.25), int(CANVAS_H * 0.06), int(CANVAS_W * 0.38), "left"),
+    }
+    if explicit_hint in zones and explicit_hint != prev_zone and zone_counts.get(explicit_hint, 0) <= min(zone_counts.values() or [0]) + 3:
+        chosen = explicit_hint
+    else:
+        sx, sy = subj_xy
+        scored = []
+        total_used = max(1, sum(zone_counts.values()))
+        for zname, (zx, zy, _, _) in zones.items():
+            if zname == prev_zone:
+                continue
+            share = zone_counts.get(zname, 0) / float(total_used)
+            # Distance bonus when text is placed in opposite quadrant from subject saliency!
+            norm_zx = zx / float(CANVAS_W)
+            norm_zy = zy / float(CANVAS_H)
+            dist = math.hypot(norm_zx - sx, norm_zy - sy)
+            # Hard penalty if a zone is approaching 24% share
+            overuse_pen = 4.0 if share >= 0.23 else (zone_counts.get(zname, 0) * 0.38)
+            scored.append((overuse_pen - dist * 0.85, zname))
+        scored.sort(key=lambda t_item: t_item[0])
+        chosen = scored[0][1]
+
+    zone_counts[chosen] = zone_counts.get(chosen, 0) + 1
+    zx, zy, zw, zal = zones[chosen]
+    return chosen, zx, zy, zw, zal
+
+
 def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[str, str]:
     global CANVAS_W, CANVAS_H, FPS
     project_dir = os.path.abspath(project_dir)
@@ -1475,7 +1649,24 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
     split_side_toggle = 0
     boxed_card_count = 0
     cutout_free_counter = 0
+    cutout_side_toggle = 0
+    press_variant_counter = 0
+    ocr_marker_count = 0
+    max_ocr_markers = max(1, min(2, int(math.ceil((total_dur_ms / 600000.0) * 2.0))))
+    prev_callout_zone: Optional[str] = None
+    callout_zone_counts: Dict[str, int] = {}
+    consecutive_text_scenes = 0
     max_boxed_cards = max(1, len(scenes) // 10)
+
+    dl_report_path = os.path.join(project_dir, "media", "download_report.json")
+    dl_report_by_sid: Dict[str, Dict[str, Any]] = {}
+    if os.path.isfile(dl_report_path):
+        try:
+            for r_row in json.load(open(dl_report_path, "r", encoding="utf-8")):
+                if isinstance(r_row, dict) and r_row.get("scene_id"):
+                    dl_report_by_sid[str(r_row["scene_id"])] = r_row
+        except Exception:
+            pass
 
     # 2. Build Scene Items
     for idx, scene in enumerate(scenes):
@@ -1530,6 +1721,9 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         on_light_canvas = False
         has_custom_entrance = False
         anchor_item_id = det_uid(f"{sid}_anchor")
+        anchor_first_id = anchor_item_id
+        anchor_last_id = anchor_item_id
+        has_tail_handle = True
 
         # ── LAYOUT A: KINETIC STATEMENT ─────────────────────────────
         if layout == "kinetic_statement":
@@ -1592,133 +1786,339 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             )
             has_custom_entrance = True
 
-        # ── LAYOUT B: CINEMATIC B-ROLL OR MOTION SCENE ──────────────
+        # ── LAYOUT B: CINEMATIC B-ROLL OR MOTION SCENE (v7.0 Zero-Freeze + Multi-Shot Sub-Beats!) ──
         elif layout in ("cinematic_broll", "motion_scene") or (layout == "full_bleed_ken_burns" and media_kind == "video"):
-            vid_mid, vid_meta = register_media(media_path)
-            src_dur_f = max(1, int(round(vid_meta["duration"] * FPS)))
-            src_end_f = min(dur_f, src_dur_f)
-            # Subtle 1.01 -> 1.04 optical push on B-roll (keep motion_scene 1:1 crisp!)
-            s_w = CANVAS_W if layout == "motion_scene" else int(CANVAS_W * 1.01)
-            s_h = CANVAS_H if layout == "motion_scene" else int(CANVAS_H * 1.01)
-            e_w = CANVAS_W if layout == "motion_scene" else int(CANVAS_W * 1.045)
-            e_h = CANVAS_H if layout == "motion_scene" else int(CANVAS_H * 1.045)
-
-            items.append(
-                {
-                    "id": anchor_item_id,
-                    "trackId": "track_anchor",
-                    "from": start_f,
-                    "durationInFrames": dur_f,
-                    "label": f"{sid}_{layout}",
-                    "type": "video",
-                    "mediaRef": vid_mid,
-                    "sourceWidth": vid_meta["width"],
-                    "sourceHeight": vid_meta["height"],
-                    "sourceStart": 0,
-                    "sourceEnd": src_end_f,
-                    "sourceDuration": src_dur_f,
-                    "volume": 0.0,
-                    "embeddedAudioMuted": True,
-                    "transform": {
-                        "x": 0,
-                        "y": 0,
-                        "width": s_w,
-                        "height": s_h,
-                        "scaleX": 1.0,
-                        "scaleY": 1.0,
-                    },
-                    "originId": anchor_item_id,
-                }
-            )
-            if layout != "motion_scene" and end_kf > 0:
-                all_keyframes.append(
+            if layout == "motion_scene":
+                vid_mid, vid_meta = register_media(media_path)
+                src_dur_f = max(1, int(round(vid_meta["duration"] * FPS)))
+                safe_dur_f = min(dur_f, src_dur_f)
+                has_tail_handle = (src_dur_f - safe_dur_f) >= 8
+                items.append(
                     {
-                        "itemId": anchor_item_id,
-                        "properties": [
-                            {
-                                "property": "width",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": s_w, "easing": "linear"},
-                                    {"id": get_uid(), "frame": end_kf, "value": e_w, "easing": "linear"},
-                                ],
-                            },
-                            {
-                                "property": "height",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": s_h, "easing": "linear"},
-                                    {"id": get_uid(), "frame": end_kf, "value": e_h, "easing": "linear"},
-                                ],
-                            },
-                        ],
+                        "id": anchor_item_id,
+                        "trackId": "track_anchor",
+                        "from": start_f,
+                        "durationInFrames": safe_dur_f,
+                        "label": f"{sid}_motion_scene",
+                        "type": "video",
+                        "mediaRef": vid_mid,
+                        "sourceWidth": vid_meta["width"],
+                        "sourceHeight": vid_meta["height"],
+                        "sourceStart": 0,
+                        "sourceEnd": safe_dur_f,
+                        "sourceDuration": src_dur_f,
+                        "volume": 0.0,
+                        "embeddedAudioMuted": True,
+                        "transform": {
+                            "x": 0,
+                            "y": 0,
+                            "width": CANVAS_W,
+                            "height": CANVAS_H,
+                            "scaleX": 1.0,
+                            "scaleY": 1.0,
+                        },
+                        "originId": anchor_item_id,
                     }
                 )
+            else:
+                # Gather all distinct video angles available for this scene (`{sid}.mp4`, `{sid}_b2.mp4`, `{sid}_b3.mp4`)
+                vid_files = [media_path]
+                for b_suf in ("_b2.mp4", "_b3.mp4"):
+                    vp_extra = os.path.join(project_dir, "media", "videos", f"{sid}{b_suf}")
+                    if os.path.isfile(vp_extra) and os.path.getsize(vp_extra) > 15000 and os.path.abspath(vp_extra) != os.path.abspath(media_path):
+                        vid_files.append(vp_extra)
 
-        # ── LAYOUT C: FULL-BLEED KEN BURNS PHOTO ────────────────────
+                reg_vids = []
+                for vf_p in vid_files:
+                    vmid, vmeta = register_media(vf_p)
+                    vdur_f = max(1, int(round(vmeta["duration"] * FPS)))
+                    reg_vids.append((vf_p, vmid, vmeta, vdur_f))
+
+                # Subdivide any B-roll > 5.8s (174f) OR any clip shorter than dur_f into crisp 3.2s–5.4s sub-shots!
+                max_single_f = 174
+                primary_src_f = reg_vids[0][3]
+                if dur_f <= max_single_f and primary_src_f >= dur_f:
+                    sub_targets = [dur_f]
+                else:
+                    n_sub = max(2, int(math.ceil(dur_f / 156.0)))
+                    base_q, rem_q = divmod(dur_f, n_sub)
+                    sub_targets = [base_q + (1 if i < rem_q else 0) for i in range(n_sub)]
+
+                cur_from = start_f
+                rem_total = dur_f
+                used_offsets: Dict[str, int] = {}
+                shot_idx = 0
+                sub_ids: List[str] = []
+                last_tail_ok = False
+
+                while rem_total > 0 and shot_idx < 8:
+                    want_f = sub_targets[shot_idx] if shot_idx < len(sub_targets) else min(rem_total, 150)
+                    want_f = min(want_f, rem_total)
+
+                    # Pick unused video file first, or unused tail slice of a long MP4, or tight alternate angle
+                    chosen_v = None
+                    src_s = 0
+                    framing_mode = shot_idx % 3  # 0=wide push, 1=tight detail punch, 2=medium drift
+                    if shot_idx < len(reg_vids) and reg_vids[shot_idx][3] >= 24:
+                        chosen_v = reg_vids[shot_idx]
+                        src_s = 0
+                    else:
+                        for rv in reg_vids:
+                            off = used_offsets.get(rv[0], 0)
+                            if rv[3] - off >= max(36, min(want_f, 90)):
+                                chosen_v = rv
+                                src_s = off
+                                break
+                    if chosen_v is None:
+                        # Check if a verified still image exists to bridge cleanly without repeating video frames
+                        fallback_img = os.path.join(project_dir, "media", "images", f"{sid}_16x9.jpg")
+                        if not os.path.isfile(fallback_img):
+                            fallback_img = os.path.join(project_dir, "media", "images", f"{sid}.jpg")
+                        if os.path.isfile(fallback_img) and shot_idx >= len(reg_vids):
+                            imid, imeta = register_media(fallback_img)
+                            sub_id = anchor_item_id if shot_idx == 0 else det_uid(f"{sid}_sub_{shot_idx}")
+                            sub_ids.append(sub_id)
+                            sx, sy, sw, sh, ex, ey, ew, eh, kb_ease, chosen_vec = build_ken_burns_keyframes(
+                                f"{sid}_sub_{shot_idx}", want_f, None, prev_kb_vector
+                            )
+                            prev_kb_vector = chosen_vec
+                            items.append(
+                                {
+                                    "id": sub_id,
+                                    "trackId": "track_anchor",
+                                    "from": cur_from,
+                                    "durationInFrames": want_f,
+                                    "label": f"{sid}_broll_still_{shot_idx + 1}",
+                                    "type": "image",
+                                    "mediaRef": imid,
+                                    "sourceWidth": imeta["width"],
+                                    "sourceHeight": imeta["height"],
+                                    "volume": 1.0,
+                                    "transform": {"x": sx, "y": sy, "width": sw, "height": sh, "scaleX": 1.0, "scaleY": 1.0},
+                                    "originId": sub_id,
+                                }
+                            )
+                            skf = last_kf(want_f)
+                            if skf > 0:
+                                all_keyframes.append(
+                                    {
+                                        "itemId": sub_id,
+                                        "properties": [
+                                            {"property": "width", "keyframes": [{"id": get_uid(), "frame": 0, "value": sw, "easing": kb_ease}, {"id": get_uid(), "frame": skf, "value": ew, "easing": kb_ease}]},
+                                            {"property": "height", "keyframes": [{"id": get_uid(), "frame": 0, "value": sh, "easing": kb_ease}, {"id": get_uid(), "frame": skf, "value": eh, "easing": kb_ease}]},
+                                        ],
+                                    }
+                                )
+                            cur_from += want_f
+                            rem_total -= want_f
+                            shot_idx += 1
+                            last_tail_ok = True
+                            continue
+
+                        chosen_v = reg_vids[shot_idx % len(reg_vids)]
+                        src_s = 0
+                        framing_mode = 1 if shot_idx % 2 == 1 else 2
+
+                    vf_p, vmid, vmeta, vdur_f = chosen_v
+                    avail_f = max(1, vdur_f - src_s)
+                    take_f = min(want_f, avail_f)
+                    src_e = src_s + take_f
+                    used_offsets[vf_p] = src_e
+                    last_tail_ok = (vdur_f - src_e) >= 8
+
+                    sub_id = anchor_item_id if shot_idx == 0 else det_uid(f"{sid}_sub_{shot_idx}")
+                    sub_ids.append(sub_id)
+
+                    if framing_mode == 0:
+                        s_w, s_h = int(CANVAS_W * 1.015), int(CANVAS_H * 1.015)
+                        e_w, e_h = int(CANVAS_W * 1.055), int(CANVAS_H * 1.055)
+                        tx0 = 0
+                    elif framing_mode == 1:
+                        s_w, s_h = int(CANVAS_W * 1.15), int(CANVAS_H * 1.15)
+                        e_w, e_h = int(CANVAS_W * 1.20), int(CANVAS_H * 1.20)
+                        tx0 = int(CANVAS_W * 0.03)
+                    else:
+                        s_w, s_h = int(CANVAS_W * 1.09), int(CANVAS_H * 1.09)
+                        e_w, e_h = int(CANVAS_W * 1.03), int(CANVAS_H * 1.03)
+                        tx0 = -int(CANVAS_W * 0.025)
+
+                    items.append(
+                        {
+                            "id": sub_id,
+                            "trackId": "track_anchor",
+                            "from": cur_from,
+                            "durationInFrames": take_f,
+                            "label": f"{sid}_broll_s{shot_idx + 1}",
+                            "type": "video",
+                            "mediaRef": vmid,
+                            "sourceWidth": vmeta["width"],
+                            "sourceHeight": vmeta["height"],
+                            "sourceStart": src_s,
+                            "sourceEnd": src_e,
+                            "sourceDuration": vdur_f,
+                            "volume": 0.0,
+                            "embeddedAudioMuted": True,
+                            "transform": {
+                                "x": tx0,
+                                "y": 0,
+                                "width": s_w,
+                                "height": s_h,
+                                "scaleX": 1.0,
+                                "scaleY": 1.0,
+                            },
+                            "originId": sub_id,
+                        }
+                    )
+                    skf = last_kf(take_f)
+                    if skf > 0:
+                        all_keyframes.append(
+                            {
+                                "itemId": sub_id,
+                                "properties": [
+                                    {
+                                        "property": "width",
+                                        "keyframes": [
+                                            {"id": get_uid(), "frame": 0, "value": s_w, "easing": "linear"},
+                                            {"id": get_uid(), "frame": skf, "value": e_w, "easing": "linear"},
+                                        ],
+                                    },
+                                    {
+                                        "property": "height",
+                                        "keyframes": [
+                                            {"id": get_uid(), "frame": 0, "value": s_h, "easing": "linear"},
+                                            {"id": get_uid(), "frame": skf, "value": e_h, "easing": "linear"},
+                                        ],
+                                    },
+                                ],
+                            }
+                        )
+                    cur_from += take_f
+                    rem_total -= take_f
+                    shot_idx += 1
+
+                if sub_ids:
+                    anchor_first_id = sub_ids[0]
+                    anchor_last_id = sub_ids[-1]
+                has_tail_handle = last_tail_handle = last_tail_ok
+
+        # ── LAYOUT C: FULL-BLEED KEN BURNS PHOTO (v7.0 Compound Multi-Shot Beats for >6.2s!) ────
         elif layout == "full_bleed_ken_burns":
-            img_mid, img_meta = register_media(media_path)
-            sx, sy, sw, sh, ex, ey, ew, eh, kb_ease, chosen_vec = build_ken_burns_keyframes(
-                sid, dur_f, scene.get("camera_motion"), prev_kb_vector
-            )
-            prev_kb_vector = chosen_vec
-            items.append(
-                {
-                    "id": anchor_item_id,
-                    "trackId": "track_anchor",
-                    "from": start_f,
-                    "durationInFrames": dur_f,
-                    "label": f"{sid}_ken_burns",
-                    "type": "image",
-                    "mediaRef": img_mid,
-                    "sourceWidth": img_meta["width"],
-                    "sourceHeight": img_meta["height"],
-                    "volume": 1.0,
-                    "transform": {
-                        "x": sx,
-                        "y": sy,
-                        "width": sw,
-                        "height": sh,
-                        "scaleX": 1.0,
-                        "scaleY": 1.0,
-                    },
-                    "originId": anchor_item_id,
-                }
-            )
-            if end_kf > 0:
-                all_keyframes.append(
+            max_photo_shot_f = 186  # 6.2s @ 30fps
+            if dur_f <= max_photo_shot_f:
+                photo_sub_durs = [dur_f]
+            else:
+                n_psub = max(2, int(math.ceil(dur_f / 156.0)))
+                pq, prem = divmod(dur_f, n_psub)
+                photo_sub_durs = [pq + (1 if i < prem else 0) for i in range(n_psub)]
+
+            # Check if high-scoring alternate landscape candidates exist in `download_report.json`
+            alt_bleeds: List[str] = [media_path]
+            rep_row = dl_report_by_sid.get(sid) or {}
+            sel_cand = int(rep_row.get("selected_cand") or 1)
+            cands_meta = rep_row.get("candidates") or []
+            top_sc = max([float(c.get("score") or 0) for c in cands_meta], default=0.0)
+            for c_obj in cands_meta:
+                c_i = int(c_obj.get("cand_idx") or 0)
+                c_p = str(c_obj.get("path") or "")
+                c_w = int(c_obj.get("width") or 0)
+                c_h = int(c_obj.get("height") or 0)
+                c_sc = float(c_obj.get("score") or 0)
+                if c_i != sel_cand and os.path.isfile(c_p) and c_w >= 800 and (is_vertical or c_w >= c_h * 1.15) and c_sc >= top_sc - 12:
+                    alt_bleeds.append(c_p)
+
+            sal_cx, sal_cy = _detect_visual_saliency_center(media_path, project_dir, sid)
+            cur_p_from = start_f
+            p_sub_ids: List[str] = []
+
+            for ps_i, ps_dur in enumerate(photo_sub_durs):
+                p_id = anchor_item_id if ps_i == 0 else det_uid(f"{sid}_psub_{ps_i}")
+                p_sub_ids.append(p_id)
+                use_img_path = alt_bleeds[ps_i] if ps_i < len(alt_bleeds) else media_path
+                img_mid, img_meta = register_media(use_img_path)
+
+                if ps_i > 0 and use_img_path == media_path:
+                    # Documentary 2-Shot Optical Cut: Tight editorial detail punch toward subject saliency!
+                    z0 = 1.21 if ps_i == 1 else 1.15
+                    z1 = 1.27 if ps_i == 1 else 1.10
+                    sw, sh = int(CANVAS_W * z0), int(CANVAS_H * z0)
+                    ew, eh = int(CANVAS_W * z1), int(CANVAS_H * z1)
+                    max_ox = max(0, (min(sw, ew) - CANVAS_W) // 2 - 8)
+                    max_oy = max(0, (min(sh, eh) - CANVAS_H) // 2 - 8)
+                    sx = max(-max_ox, min(max_ox, -int(sal_cx * max_ox * 1.3)))
+                    sy = max(-max_oy, min(max_oy, -int(sal_cy * max_oy * 1.3)))
+                    ex = max(-max_ox, min(max_ox, int(sx * 0.65)))
+                    ey = max(-max_oy, min(max_oy, int(sy * 0.65)))
+                    kb_ease = "ease-out"
+                else:
+                    sx, sy, sw, sh, ex, ey, ew, eh, kb_ease, chosen_vec = build_ken_burns_keyframes(
+                        f"{sid}_{ps_i}", ps_dur, scene.get("camera_motion") if ps_i == 0 else None, prev_kb_vector
+                    )
+                    prev_kb_vector = chosen_vec
+
+                items.append(
                     {
-                        "itemId": anchor_item_id,
-                        "properties": [
-                            {
-                                "property": "width",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": sw, "easing": kb_ease},
-                                    {"id": get_uid(), "frame": end_kf, "value": ew, "easing": kb_ease},
-                                ],
-                            },
-                            {
-                                "property": "height",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": sh, "easing": kb_ease},
-                                    {"id": get_uid(), "frame": end_kf, "value": eh, "easing": kb_ease},
-                                ],
-                            },
-                            {
-                                "property": "x",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": sx, "easing": kb_ease},
-                                    {"id": get_uid(), "frame": end_kf, "value": ex, "easing": kb_ease},
-                                ],
-                            },
-                            {
-                                "property": "y",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": sy, "easing": kb_ease},
-                                    {"id": get_uid(), "frame": end_kf, "value": ey, "easing": kb_ease},
-                                ],
-                            },
-                        ],
+                        "id": p_id,
+                        "trackId": "track_anchor",
+                        "from": cur_p_from,
+                        "durationInFrames": ps_dur,
+                        "label": f"{sid}_ken_burns" if len(photo_sub_durs) == 1 else f"{sid}_ken_burns_s{ps_i + 1}",
+                        "type": "image",
+                        "mediaRef": img_mid,
+                        "sourceWidth": img_meta["width"],
+                        "sourceHeight": img_meta["height"],
+                        "volume": 1.0,
+                        "transform": {
+                            "x": sx,
+                            "y": sy,
+                            "width": sw,
+                            "height": sh,
+                            "scaleX": 1.0,
+                            "scaleY": 1.0,
+                        },
+                        "originId": p_id,
                     }
                 )
+                pkf = last_kf(ps_dur)
+                if pkf > 0:
+                    all_keyframes.append(
+                        {
+                            "itemId": p_id,
+                            "properties": [
+                                {
+                                    "property": "width",
+                                    "keyframes": [
+                                        {"id": get_uid(), "frame": 0, "value": sw, "easing": kb_ease},
+                                        {"id": get_uid(), "frame": pkf, "value": ew, "easing": kb_ease},
+                                    ],
+                                },
+                                {
+                                    "property": "height",
+                                    "keyframes": [
+                                        {"id": get_uid(), "frame": 0, "value": sh, "easing": kb_ease},
+                                        {"id": get_uid(), "frame": pkf, "value": eh, "easing": kb_ease},
+                                    ],
+                                },
+                                {
+                                    "property": "x",
+                                    "keyframes": [
+                                        {"id": get_uid(), "frame": 0, "value": sx, "easing": kb_ease},
+                                        {"id": get_uid(), "frame": pkf, "value": ex, "easing": kb_ease},
+                                    ],
+                                },
+                                {
+                                    "property": "y",
+                                    "keyframes": [
+                                        {"id": get_uid(), "frame": 0, "value": sy, "easing": kb_ease},
+                                        {"id": get_uid(), "frame": pkf, "value": ey, "easing": kb_ease},
+                                    ],
+                                },
+                            ],
+                        }
+                    )
+                cur_p_from += ps_dur
+
+            anchor_first_id = p_sub_ids[0]
+            anchor_last_id = p_sub_ids[-1]
 
         # ── LAYOUT D: EDITORIAL BACKDROP FRAME (Uncropped Portrait / Product / Evidence) ──
         elif layout == "editorial_backdrop_frame":
@@ -2037,15 +2437,19 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             on_light_canvas = (archetype == "archival_dossier_paper")
             st_plain, st_spans, st_font, st_in, bg_token = build_cutout_editorial_lockup(scene, archetype)
 
-            # Subject horizontal placement normalized in [-0.5, +0.5]
+            # Subject horizontal placement normalized in [-0.5, +0.5]: alternate Center (0.0), Right (+0.21), Left (-0.21)!
+            explicit_side = str(scene.get("subject_side") or "").strip().lower()
             if is_vertical or archetype == "poster_monumental_center":
                 subj_x_norm = 0.0
-            elif archetype == "archival_dossier_paper":
+            elif explicit_side == "left":
+                subj_x_norm = -0.21
+            elif explicit_side == "right":
                 subj_x_norm = 0.21
             else:
-                subj_x_norm = 0.21
+                subj_x_norm = 0.21 if (cutout_side_toggle % 2 == 0) else -0.21
+                cutout_side_toggle += 1
 
-            stage_plate_path = os.path.join(project_dir, "media", "backdrops", f"{sid}_{archetype}_v63.jpg")
+            stage_plate_path = os.path.join(project_dir, "media", "backdrops", f"{sid}_{archetype}_v70.jpg")
             generate_cutout_stage_backdrop(stage_plate_path, archetype, accent_rgb, f"{sid}_{archetype}", subject_x_norm=subj_x_norm)
             bg_mid, bg_meta = register_media(stage_plate_path)
 
@@ -2102,7 +2506,14 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 )
 
             if use_monumental_bg_type:
-                mon_txt = "  ".join(list(str(bg_token))) if len(str(bg_token)) == 4 and str(bg_token).isdigit() else str(bg_token)
+                raw_bt = str(bg_token).strip()
+                mon_txt = " ".join(list(raw_bt)) if len(raw_bt) == 4 and raw_bt.isdigit() else raw_bt
+                mon_box_w = int(CANVAS_W * (0.92 if is_vertical else 0.90))
+                n_glyphs = max(4, len(mon_txt))
+                auto_mon_fs = max(132, min(215 if is_vertical else 310, int(mon_box_w / (n_glyphs * 0.66))))
+                auto_mon_ls = 10.0 if n_glyphs <= 5 else (5.0 if n_glyphs <= 8 else 2.0)
+                mon_tints = ["#6EE7B7", "#FDE68A", "#93C5FD", "#F9A8D4"]
+                mon_col = mon_tints[idx % len(mon_tints)]
                 mon_x = 0
                 mon_y = int(CANVAS_H * (0.02 if is_vertical else -0.10))
                 append_native_text_item(
@@ -2115,19 +2526,19 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                     text=mon_txt,
                     x=mon_x,
                     y=mon_y,
-                    width=int(CANVAS_W * (0.90 if is_vertical else 0.84)),
+                    width=mon_box_w,
                     height=420,
-                    font_size=220 if is_vertical else 330,
+                    font_size=auto_mon_fs,
                     font_family="Bebas Neue",
                     font_weight="bold",
-                    color="#6EE7B7",
+                    color=mon_col,
                     text_align="center",
                     entry_type="rise",
                     exit_type="fade-down",
                     opacity=0.24,
                     on_light_bg=False,
                     over_busy_media=False,
-                    letter_spacing=12.0,
+                    letter_spacing=auto_mon_ls,
                     line_height=1.0,
                     track_id="track_anchor",
                 )
@@ -2247,7 +2658,13 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 if is_vertical:
                     tx, ty, tw, talign = 0, -int(CANVAS_H * 0.28), int(CANVAS_W * 0.86), "center"
                 elif archetype == "poster_monumental_center":
-                    tx, ty, tw, talign, t_box_h = 0, int(CANVAS_H * 0.355), int(CANVAS_W * 0.74), "center", 190
+                    tx, ty, tw, talign, t_box_h = 0, int(CANVAS_H * 0.355), int(CANVAS_W * 0.76), "center", 190
+                elif subj_x_norm < 0:
+                    # Subject is on LEFT (-0.21) -> place editorial typography cleanly on RIGHT!
+                    tx = int(CANVAS_W * (0.20 if archetype == "archival_dossier_paper" else 0.22))
+                    ty = -int(CANVAS_H * 0.01)
+                    tw = int(CANVAS_W * 0.41)
+                    talign = "left"
                 elif archetype == "archival_dossier_paper":
                     tx, ty, tw, talign = -int(CANVAS_W * 0.19), -int(CANVAS_H * 0.01), int(CANVAS_W * 0.42), "left"
                 else:
@@ -2278,9 +2695,28 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                     over_busy_media=not on_light_canvas,
                     line_height=1.22,
                 )
+                consecutive_text_scenes += 1
 
-        # ── LAYOUT G: PRESS EVIDENCE HIGHLIGHT (Real Clipping + Animated Marker Sweep) ──
+        # ── LAYOUT G: PRESS EVIDENCE HIGHLIGHT (v7.0 — 5 Rotating Editorial Press Treatments!) ──
         elif layout == "press_evidence_highlight":
+            press_variants = (
+                "tilted_3d_push",
+                "dossier_focus_brackets",
+                "pull_quote_editorial",
+                "headline_underline_ink",
+                "ocr_marker_highlight",
+            )
+            req_ev = str(scene.get("evidence_variant") or "").strip().lower()
+            if req_ev in press_variants:
+                ev_variant = req_ev
+            else:
+                ev_variant = press_variants[press_variant_counter % len(press_variants)]
+                press_variant_counter += 1
+
+            # Hard cap on yellow highlighter (`<= 2` per 10-minute video!)
+            if ev_variant == "ocr_marker_highlight" and ocr_marker_count >= max_ocr_markers:
+                ev_variant = "dossier_focus_brackets" if (press_variant_counter % 2 == 0) else "tilted_3d_push"
+
             plate_path = os.path.join(project_dir, "media", "backdrops", f"{sid}_plate_v63.jpg")
             if not os.path.isfile(plate_path):
                 generate_fallback_blur_plate(media_path, plate_path)
@@ -2304,7 +2740,9 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             )
             ev_mid, ev_meta = register_media(media_path)
             ev_aspect = (ev_meta["width"] / float(ev_meta["height"])) if ev_meta["height"] > 0 else 1.5
-            max_ew = int(CANVAS_W * (0.88 if is_vertical else 0.74))
+
+            is_pull_quote = (ev_variant == "pull_quote_editorial" and not is_vertical)
+            max_ew = int(CANVAS_W * (0.88 if is_vertical else (0.52 if is_pull_quote else 0.74)))
             max_eh = int(CANVAS_H * (0.55 if is_vertical else 0.76))
             ew = max_ew
             eh = int(round(ew / max(0.2, ev_aspect)))
@@ -2312,73 +2750,149 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 eh = max_eh
                 ew = int(round(eh * ev_aspect))
 
+            print_x = int(CANVAS_W * 0.16) if is_pull_quote else 0
+            print_y = -18 if scene.get("caption") else 0
+            init_rot = -1.6 if ev_variant == "tilted_3d_push" else (1.1 if is_pull_quote else -0.4)
+
             items.append(
                 {
                     "id": anchor_item_id,
                     "trackId": "track_anchor",
                     "from": start_f,
                     "durationInFrames": dur_f,
-                    "label": f"{sid}_press_print",
+                    "label": f"{sid}_press_{ev_variant}",
                     "type": "image",
                     "mediaRef": ev_mid,
                     "sourceWidth": ev_meta["width"],
                     "sourceHeight": ev_meta["height"],
                     "volume": 1.0,
                     "transform": {
-                        "x": 0,
-                        "y": -20 if scene.get("caption") else 0,
+                        "x": print_x,
+                        "y": print_y,
                         "width": ew,
                         "height": eh,
                         "scaleX": 1.0,
                         "scaleY": 1.0,
-                        "rotation": -0.6,
-                        "cornerRadius": 6,
-                        "dropShadow": {"blur": 40, "color": "rgba(0,0,0,0.68)", "offsetX": 0, "offsetY": 16},
+                        "rotation": init_rot,
+                        "cornerRadius": 8,
+                        "dropShadow": {"blur": 44, "color": "rgba(0,0,0,0.70)", "offsetX": 0, "offsetY": 18},
                     },
                     "originId": anchor_item_id,
                 }
             )
             if end_kf > 0:
-                all_keyframes.append(
+                zoom_mult = 1.065 if ev_variant == "tilted_3d_push" else 1.04
+                kf_ev_props = [
                     {
-                        "itemId": anchor_item_id,
-                        "properties": [
-                            {
-                                "property": "width",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": ew, "easing": "ease-out"},
-                                    {"id": get_uid(), "frame": end_kf, "value": int(ew * 1.045), "easing": "linear"},
-                                ],
-                            },
-                            {
-                                "property": "height",
-                                "keyframes": [
-                                    {"id": get_uid(), "frame": 0, "value": eh, "easing": "ease-out"},
-                                    {"id": get_uid(), "frame": end_kf, "value": int(eh * 1.045), "easing": "linear"},
-                                ],
-                            },
+                        "property": "width",
+                        "keyframes": [
+                            {"id": get_uid(), "frame": 0, "value": ew, "easing": "ease-out"},
+                            {"id": get_uid(), "frame": end_kf, "value": int(ew * zoom_mult), "easing": "linear"},
                         ],
-                    }
+                    },
+                    {
+                        "property": "height",
+                        "keyframes": [
+                            {"id": get_uid(), "frame": 0, "value": eh, "easing": "ease-out"},
+                            {"id": get_uid(), "frame": end_kf, "value": int(eh * zoom_mult), "easing": "linear"},
+                        ],
+                    },
+                ]
+                if ev_variant == "tilted_3d_push":
+                    kf_ev_props.append(
+                        {
+                            "property": "rotation",
+                            "keyframes": [
+                                {"id": get_uid(), "frame": 0, "value": -1.6, "easing": "ease-out"},
+                                {"id": get_uid(), "frame": end_kf, "value": -0.2, "easing": "linear"},
+                            ],
+                        }
+                    )
+                all_keyframes.append({"itemId": anchor_item_id, "properties": kf_ev_props})
+
+            if is_pull_quote:
+                pq_raw = scene.get("headline") or scene.get("caption") or "Registro de Imprensa"
+                pq_plain, pq_spans, pq_font, pq_in = build_callout_spans(pq_raw, idx)
+                append_native_text_item(
+                    items=items,
+                    all_keyframes=all_keyframes,
+                    item_id=det_uid(f"{sid}_press_quote"),
+                    from_f=start_f + 4,
+                    dur_f=max(12, dur_f - 6),
+                    label=f"{sid}_press_pull_quote",
+                    text=pq_plain,
+                    x=-int(CANVAS_W * 0.28),
+                    y=0,
+                    width=int(CANVAS_W * 0.34),
+                    height=320,
+                    font_size=42,
+                    font_family=pq_font,
+                    font_weight="bold",
+                    color="#F8FAFC",
+                    text_align="left",
+                    entry_type=pq_in,
+                    exit_type="fade-down",
+                    text_spans=pq_spans,
+                    on_light_bg=False,
+                    over_busy_media=True,
+                    line_height=1.22,
                 )
-            # Auto-attach translucent yellow marker highlight Lottie synced to anchor_word!
+
             if not scene.get("lottie_overlay") and os.path.isfile(LOTTIE_GEN_SCRIPT):
-                auto_lot = os.path.join(project_dir, "lottie", f"{sid}_marker.json")
-                if not os.path.isfile(auto_lot):
+                off_f = find_word_offset_frames(words_list, start_ms, end_ms, scene.get("anchor_word", ""))
+                hx, hy, hw, hh = _locate_press_headline_box(media_path, ew, eh, print_x, print_y)
+                if ev_variant == "ocr_marker_highlight":
+                    ocr_marker_count += 1
+                    auto_lot = os.path.join(project_dir, "lottie", f"{sid}_ocr_marker.json")
                     subprocess.run(
-                        [sys.executable, LOTTIE_GEN_SCRIPT, "--kind", "marker_highlight", "--accent", "#FACC15", "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
+                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "marker_highlight", "--accent", "#FACC15", "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
+                        stdin=subprocess.DEVNULL,
                         capture_output=True,
                     )
-                if os.path.isfile(auto_lot):
-                    off_f = find_word_offset_frames(words_list, start_ms, end_ms, scene.get("anchor_word", ""))
-                    scene = dict(scene)
-                    scene["lottie_overlay"] = {
-                        "file": auto_lot,
-                        "x": int(scene.get("highlight_x", 0)),
-                        "y": int(scene.get("highlight_y", -int(eh * 0.16))),
-                        "width": int(ew * 0.72),
-                        "height": 96,
-                        "offset_frames": off_f,
-                    }
+                    if os.path.isfile(auto_lot):
+                        scene = dict(scene)
+                        scene["lottie_overlay"] = {
+                            "file": auto_lot,
+                            "x": int(scene.get("highlight_x", hx)),
+                            "y": int(scene.get("highlight_y", hy)),
+                            "width": hw,
+                            "height": hh,
+                            "offset_frames": off_f,
+                        }
+                elif ev_variant == "dossier_focus_brackets":
+                    auto_lot = os.path.join(project_dir, "lottie", f"{sid}_focus_brackets.json")
+                    subprocess.run(
+                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "focus_corner_brackets", "--accent", "#E11D48", "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                    )
+                    if os.path.isfile(auto_lot):
+                        scene = dict(scene)
+                        scene["lottie_overlay"] = {
+                            "file": auto_lot,
+                            "x": hx,
+                            "y": hy,
+                            "width": min(int(ew * 0.88), int(hw * 1.12)),
+                            "height": max(130, int(hh * 1.8)),
+                            "offset_frames": off_f,
+                        }
+                elif ev_variant == "headline_underline_ink":
+                    auto_lot = os.path.join(project_dir, "lottie", f"{sid}_ink_underline.json")
+                    subprocess.run(
+                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "handdrawn_underline", "--accent", "#EF4444", "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                    )
+                    if os.path.isfile(auto_lot):
+                        scene = dict(scene)
+                        scene["lottie_overlay"] = {
+                            "file": auto_lot,
+                            "x": hx,
+                            "y": hy + int(hh * 0.55),
+                            "width": hw,
+                            "height": 95,
+                            "offset_frames": off_f,
+                        }
             has_custom_entrance = True
 
         # ── LAYOUT H: A-ROLL / TALKING-HEAD YAP OVERLAY ───────────────
@@ -2540,44 +3054,55 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                     items.append(item_obj)
             has_custom_entrance = True
 
-        # ── OPTIONAL TEXT CALLOUTS FOR FULL-BLEED / B-ROLL SCENES (Aspect-Ratio Safe!) ────
+        # ── OPTIONAL TEXT CALLOUTS FOR FULL-BLEED / B-ROLL SCENES (v7.0: ~35% Breathing Room + 6-Zone Routing!) ────
         if layout in ("cinematic_broll", "full_bleed_ken_burns") and (scene.get("headline") or scene.get("caption")):
-            call_raw = scene.get("headline") or scene.get("caption")
-            c_plain, c_spans, c_font, c_in = build_callout_spans(call_raw, idx)
-            pos_hint = scene.get("text_position", "bottom_center" if is_vertical else "bottom_left")
-            if is_vertical:
-                tx, ty, tw, talign = 0, (int(CANVAS_H * 0.24) if pos_hint != "top_left" else -int(CANVAS_H * 0.32)), int(CANVAS_W * 0.84), "center"
-            elif pos_hint == "top_left":
-                tx, ty, tw, talign = -int(CANVAS_W * 0.25), -int(CANVAS_H * 0.36), int(CANVAS_W * 0.42), "left"
-            elif pos_hint == "bottom_center":
-                tx, ty, tw, talign = 0, int(CANVAS_H * 0.36), int(CANVAS_W * 0.72), "center"
-            else:
-                tx, ty, tw, talign = -int(CANVAS_W * 0.22), int(CANVAS_H * 0.35), int(CANVAS_W * 0.46), "left"
-
-            append_native_text_item(
-                items=items,
-                all_keyframes=all_keyframes,
-                item_id=det_uid(f"{sid}_callout_txt"),
-                from_f=start_f + 5,
-                dur_f=max(12, dur_f - 8),
-                label=f"{sid}_callout",
-                text=c_plain,
-                x=tx,
-                y=ty,
-                width=tw,
-                height=165,
-                font_size=int(scene.get("font_size", 40)),
-                font_family=c_font,
-                font_weight="bold",
-                color="#FFFFFF",
-                text_align=talign,
-                entry_type=scene.get("text_entry", c_in),
-                exit_type="fade-down",
-                text_spans=c_spans,
-                on_light_bg=False,
-                over_busy_media=True,
-                line_height=1.20,
+            call_raw = str(scene.get("headline") or scene.get("caption") or "").strip()
+            has_hard_stat = bool(scene.get("hero_stat")) or bool(re.search(r"\b\d{4}\b|(?:R\$|US\$|\$)\s*\d|\d+\s*(?:%|MI|BI|MIL)", call_raw, flags=re.IGNORECASE))
+            is_silent_beat = bool(scene.get("silent_visual")) or (
+                not scene.get("force_callout")
+                and not has_hard_stat
+                and idx > 0
+                and idx < len(scenes) - 1
+                and consecutive_text_scenes >= 2
             )
+            if is_silent_beat:
+                consecutive_text_scenes = 0
+            else:
+                consecutive_text_scenes += 1
+                c_plain, c_spans, c_font, c_in = build_callout_spans(call_raw, idx)
+                subj_xy = _detect_visual_saliency_center(media_path, project_dir, sid)
+                explicit_pos = scene.get("text_position") if "text_position" in scene else None
+                chosen_zone, tx, ty, tw, talign = _pick_callout_zone_v7(
+                    sid, explicit_pos, subj_xy, prev_callout_zone, callout_zone_counts, is_vertical
+                )
+                prev_callout_zone = chosen_zone
+
+                append_native_text_item(
+                    items=items,
+                    all_keyframes=all_keyframes,
+                    item_id=det_uid(f"{sid}_callout_txt"),
+                    from_f=start_f + 5,
+                    dur_f=max(12, dur_f - 8),
+                    label=f"{sid}_callout_{chosen_zone}",
+                    text=c_plain,
+                    x=tx,
+                    y=ty,
+                    width=tw,
+                    height=165,
+                    font_size=int(scene.get("font_size", 40)),
+                    font_family=c_font,
+                    font_weight="bold",
+                    color="#FFFFFF",
+                    text_align=talign,
+                    entry_type=scene.get("text_entry", c_in),
+                    exit_type="fade-down",
+                    text_spans=c_spans,
+                    on_light_bg=False,
+                    over_busy_media=True,
+                    line_height=1.20,
+                )
+        elif layout in ("cinematic_broll", "full_bleed_ken_burns", "motion_scene"):
+            consecutive_text_scenes = 0
 
         # ── OPTIONAL TRANSPARENT LOTTIE OVERLAY (`track_fg_3`) ───────
         lottie_cfg = scene.get("lottie_overlay")
@@ -2666,35 +3191,40 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         anchor_scene_records.append(
             {
                 "sid": sid,
-                "item_id": anchor_item_id,
+                "first_item_id": anchor_first_id,
+                "last_item_id": anchor_last_id,
                 "layout": layout,
                 "has_custom_entrance": has_custom_entrance,
+                "has_tail_handle": has_tail_handle,
                 "transition": scene.get("transition"),
             }
         )
 
-    # 3. Curated Documentary Transitions between Full-Frame Anchor Clips
+    # 3. Curated Documentary Transitions (~38% crisp hard cuts + 5 varied presentations + handle-safe!)
     transitions_list: List[Dict[str, Any]] = []
-    rng_tr = random.Random(f"{project_id}_transitions")
-    doc_presets = ["dissolve", "dissolve", "blurDissolve", "filmGateSlip"]
+    rng_tr = random.Random(f"{project_id}_transitions_v7")
+    doc_presets = ["dissolve", "blurDissolve", "filmGateSlip", "slide", "wipe"]
 
     for i in range(len(anchor_scene_records) - 1):
         left = anchor_scene_records[i]
         right = anchor_scene_records[i + 1]
-        # Never crossfade into/out of framed slides with custom offscreen entrances or light paper splits
-        if left["has_custom_entrance"] or right["has_custom_entrance"]:
+        # Never crossfade into/out of framed slides with custom offscreen entrances or videos lacking tail handle frames!
+        if left["has_custom_entrance"] or right["has_custom_entrance"] or not left.get("has_tail_handle", True):
             continue
         explicit_tr = right.get("transition")
         if explicit_tr == "cut":
             continue
-        preset = explicit_tr if explicit_tr in ("dissolve", "blurDissolve", "slide", "wipe", "filmGateSlip") else rng_tr.choice(doc_presets)
+        if not explicit_tr and rng_tr.random() < 0.38:
+            # Keep ~38% crisp rhythmic hard cuts like human documentary editors!
+            continue
+        preset = explicit_tr if explicit_tr in doc_presets else doc_presets[i % len(doc_presets)]
         tr_obj: Dict[str, Any] = {
             "id": det_uid(f"{project_id}_trans_{i}"),
-            "leftClipId": left["item_id"],
-            "rightClipId": right["item_id"],
+            "leftClipId": left["last_item_id"],
+            "rightClipId": right["first_item_id"],
             "trackId": "track_anchor",
             "type": "crossfade",
-            "durationInFrames": rng_tr.randint(10, 15),
+            "durationInFrames": rng_tr.randint(9, 14),
             "presentation": preset,
             "timing": "linear",
             "alignment": 0.5,

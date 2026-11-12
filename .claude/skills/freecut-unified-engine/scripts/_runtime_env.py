@@ -17,6 +17,10 @@ import os
 import site
 import sys
 
+# Prevent Python from writing __pycache__/*.pyc inside .agents/skills/ so OpenBot Share stays clean ("installed")
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 
 def ensure_user_site():
     try:
