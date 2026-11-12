@@ -1,24 +1,25 @@
-# FreeCut Universal Studio Kit (v7.2 Final) — Instalação, Pixabay Grátis & Uso Só com Áudio
+# FreeCut Universal Studio Kit (v8.0) — Como Compartilhar, Pixabay Grátis & PC Virgem
 
-Este pacote transforma **qualquer IA Frontier** (**OpenBot**, **Claude Code**, **Gemini / Antigravity** ou **Codex / Cursor**) em um **Editor de Vídeo Sênior e Diretor de Arte autônomo** para o [FreeCut (`walterlow/freecut`)](https://github.com/walterlow/freecut), **100% autônomo**, com **memória contínua de contexto** e **ZERO API paga obrigatória**.
-
----
-
-## 0. API Gratuita Recomendada para Vídeos & Fotos de Stock: Pixabay (`PIXABAY_API_KEY`)
-Como o Pexels pausou a emissão de novas chaves de API, o motor `v7.2` usa o **Pixabay** como provedor gratuito principal de vídeos 1080p e fotos Full HD de stock:
-1. Crie uma conta gratuita em 30 segundos e copie sua chave em `https://pixabay.com/api/docs/`.
-2. Na **1ª execução**, o bot pergunta uma única vez se você quer informar sua `PIXABAY_API_KEY` (ou rodar 100% sem nenhuma chave usando scraping multi-motor).
-3. Se você também já tiver uma `PEXELS_API_KEY` antiga, ela continua funcionando normalmente como complementar.
+Este pacote transforma **qualquer IA Frontier** (**OpenBot**, **Claude Code**, **Gemini / Antigravity** ou **Codex / Cursor**) em um **Editor de Vídeo Sênior e Diretor de Arte Camaleão autônomo** para o [FreeCut (`walterlow/freecut`)](https://github.com/walterlow/freecut), **100% autônomo**, com **motions criativos inéditos via LLM**, **memória anti-clone** e **ZERO API paga obrigatória**.
 
 ---
 
-## 1. Como Funciona o 1º Uso + Memória de Contexto + Só Áudio
-1. **1º Uso Inteligente (`.freecut-setup-done.json`):** No primeiro contato em um PC novo, o bot/skill verifica e instala automaticamente Python, FFmpeg, `faster-whisper`, `rembg`, Playwright Chromium e o atlas offline de 242 países, pergunta **uma única vez** sobre chaves opcionais (`PIXABAY_API_KEY`, `GROQ_API_KEY`, `ELEVENLABS_API_KEY`) e grava `.freecut-setup-done.json` para nunca mais interromper nos próximos vídeos.
-2. **Memória Contínua do Canal (`.freecut-creator-memory.json` + Memória do OpenBot):** A cada vídeo concluído e a cada ajuste que você pedir (*"sempre 9:16"*, *"prefiro fundos claros"*, *"ritmo mais rápido"*), `creator_memory.py` salva essas regras localmente e registra as paletas/abertura usadas para que os próximos vídeos mantenham o DNA do seu canal sem repetir a mesma abertura.
-3. **Vídeo Perfeito Só com o Áudio:** A partir do setup feito, basta soltar apenas o `.mp3` / `.wav` / `.m4a` no chat. Sem questionários: ele transcreve palavra por palavra, consulta a memória do canal, busca fotos reais para nomes/marcas citados (`specific: true`) e vídeos HD no Pixabay para cenas de atmosfera (`specific: false`), confere tudo visualmente em subagente isolado e entrega a `freecut_workspace` com `100%` dos caches prontos.
+## 0. Segurança ao Compartilhar o Bot (Zero Chaves / Zero Dados Locais)
+- Ao compartilhar o **`Editor-FreeCut`** pelo link do OpenBot, pelo [FreeCut-Doc-Bot-Shareable.zip](https://github.com/aldocaesar/freecut-studio-kit) ou pelo GitHub:
+  - **Sua chave de API nunca vai junto:** chaves salvas no Cofre do OpenBot (`PIXABAY_API_KEY`, etc.) ficam criptografadas exclusivamente no servidor OpenBot da sua máquina; nenhum `.env`, projeto local (`projects/`) ou histórico pessoal vai no pacote.
+  - No PC da outra pessoa, ela cadastra a própria `PIXABAY_API_KEY` gratuita (`https://pixabay.com/api/docs/`) ou usa o modo 100% sem chaves.
+
+---
+
+## 1. O Que Acontece no PC Novo Quando a Pessoa Manda a Chave da API (ou o 1º Áudio)
+1. **Mandou a `PIXABAY_API_KEY` direto no chat (mesmo na 1ª mensagem):**
+   - O bot salva a chave na hora no Cofre do OpenBot da pessoa (ou `.env` local fora do OpenBot), sem repetir o segredo no chat.
+   - Na mesma hora, se o PC for virgem, ele baixa o kit completo do GitHub (se faltar), instala automaticamente Python 3, FFmpeg, pacotes Python (`faster-whisper`, `rembg`, `opencv`, `playwright`, `yt-dlp`) e o navegador headless Chromium, valida tudo com `doctor.py -> RESULT: [READY]` e grava `.freecut-setup-done.json` apenas após passar no teste.
+   - *(No OpenBot da outra pessoa, basta deixar o acesso do agente em **Full access** / aprovar a instalação na primeira vez para que ele possa instalar os programas no PC dela.)*
+2. **Memória Contínua Anti-Clone (`.freecut-creator-memory.json`):** A cada vídeo concluído e a cada ajuste pedido (*"sempre 9:16"*, *"sem legenda"*), `creator_memory.py` lembra as preferências do canal e evita repetir paletas, fontes e metáforas de motion do vídeo anterior.
+3. **Vídeo Completo Só com o Áudio:** A partir do setup pronto, basta soltar apenas o `.mp3` / `.wav` / `.m4a` no chat — zero questionários!
 
 ---
 
 ## 2. Como Abrir em ~1–2s no Google Chrome (Sem Delay!)
-Ao terminar, o bot entrega o link clicável da pasta **`freecut_workspace`** já pré-cacheada (`thumbnail.jpg`, `filmstrip` 1fps e ondas `WFORM` binárias):
-- No FreeCut aberto no Chrome, clique em **Workspace → Change / Select Workspace Folder** e selecione diretamente a pasta `freecut_workspace` (evite *Import Project `.freecut.zip`* localmente, pois o ZIP precisa descompactar centenas de MB na memória do navegador).
+Ao terminar, aponte o **Workspace → Change / Select Workspace Folder** do FreeCut (Chrome) diretamente para a pasta **`freecut_workspace`** gerada (já pré-cacheada com miniaturas, `filmstrip` 1fps e ondas `WFORM`).

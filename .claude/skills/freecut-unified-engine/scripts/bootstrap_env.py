@@ -135,9 +135,9 @@ def ensure_pip_packages():
         flush=True,
     )
     attempts = [
-        [sys.executable, "-m", "pip", "install", "--upgrade"] + missing_specs,
-        [sys.executable, "-m", "pip", "install", "--user", "--upgrade"] + missing_specs,
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--upgrade"] + missing_specs,
+        [sys.executable, "-B", "-m", "pip", "install", "--upgrade"] + missing_specs,
+        [sys.executable, "-B", "-m", "pip", "install", "--user", "--upgrade"] + missing_specs,
+        [sys.executable, "-B", "-m", "pip", "install", "--break-system-packages", "--upgrade"] + missing_specs,
     ]
     for cmd in attempts:
         res = _run(cmd, check=False)
@@ -149,7 +149,7 @@ def ensure_pip_packages():
 
 def ensure_playwright_chromium():
     print("[bootstrap] Ensuring Playwright Chromium headless browser is installed...", flush=True)
-    _run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+    _run([sys.executable, "-B", "-m", "playwright", "install", "chromium"], check=True)
 
 
 def install_freecut_ui(target_dir: str):
@@ -228,18 +228,20 @@ def main():
         setup_optional_env_keys(ws_env)
         args.mark_onboarded = True
 
-    if args.mark_onboarded:
-        import json as _json
-        with open(marker_file, "w", encoding="utf-8") as mf:
-            _json.dump({"version": "6.4", "onboarded": True}, mf)
-        print(f"[bootstrap] Onboarding marker saved -> {marker_file}", flush=True)
+    def _write_marker():
+        if args.mark_onboarded:
+            import json as _json
+            with open(marker_file, "w", encoding="utf-8") as mf:
+                _json.dump({"version": "8.0", "onboarded": True}, mf)
+            print(f"[bootstrap] Onboarding marker saved -> {marker_file}", flush=True)
 
     if not args.force and os.path.isfile(DOCTOR_SCRIPT):
-        probe = subprocess.run([sys.executable, DOCTOR_SCRIPT], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        probe = subprocess.run([sys.executable, "-B", DOCTOR_SCRIPT], stdin=subprocess.DEVNULL, capture_output=True, text=True)
         if probe.returncode == 0:
             print("[bootstrap] Environment already [READY] (0 missing dependencies).", flush=True)
             if args.with_freecut_ui:
                 install_freecut_ui(args.with_freecut_ui)
+            _write_marker()
             sys.exit(0)
 
     ensure_ffmpeg()
@@ -249,8 +251,12 @@ def main():
         install_freecut_ui(args.with_freecut_ui)
 
     if os.path.isfile(DOCTOR_SCRIPT):
-        final = subprocess.run([sys.executable, DOCTOR_SCRIPT], stdin=subprocess.DEVNULL)
+        final = subprocess.run([sys.executable, "-B", DOCTOR_SCRIPT], stdin=subprocess.DEVNULL)
+        if final.returncode == 0:
+            _write_marker()
         sys.exit(final.returncode)
+
+    _write_marker()
 
 
 if __name__ == "__main__":

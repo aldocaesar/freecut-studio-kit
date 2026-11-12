@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   FreeCut Universal Studio Bot (v6) — One-Command Windows Installer (`install.ps1`)
 .DESCRIPTION
@@ -58,17 +58,23 @@ if ($UseVenv) {
 }
 
 Write-Host "  Installing Python packages from requirements.txt..." -ForegroundColor Yellow
-& $PyExe -m pip install --upgrade pip
-& $PyExe -m pip install -r "$Root\requirements.txt"
+& $PyExe -B -m pip install --upgrade pip
+& $PyExe -B -m pip install -r "$Root\requirements.txt"
 
 Write-Host "`n[3/5] Installing Playwright Chromium headless renderer..." -ForegroundColor Cyan
-& $PyExe -m playwright install chromium
+& $PyExe -B -m playwright install chromium
 
 Write-Host "`n[4/5] Syncing skills for all Frontier AIs (.agents/skills <-> .claude/skills)..." -ForegroundColor Cyan
 $ClaudeSkills = Join-Path $Root ".claude\skills"
 if (Test-Path $ClaudeSkills) { Remove-Item -Recurse -Force $ClaudeSkills }
 New-Item -ItemType Directory -Force -Path $ClaudeSkills | Out-Null
-Copy-Item -Recurse -Force (Join-Path $Root ".agents\skills\*") $ClaudeSkills
+foreach ($sk in "doc-art-director","doc-lottie-overlays","doc-motion-scenes","freecut-unified-engine") {
+    $srcSk = Join-Path $Root ".agents\skills\$sk"
+    if (Test-Path $srcSk) {
+        Copy-Item -Recurse -Force $srcSk (Join-Path $ClaudeSkills $sk)
+        Remove-Item -Force (Join-Path $ClaudeSkills "$sk\.openbot-managed.json") -ErrorAction SilentlyContinue
+    }
+}
 
 if (-not (Test-Path "$Root\.env") -and (Test-Path "$Root\.env.example")) {
     Copy-Item "$Root\.env.example" "$Root\.env"
@@ -92,11 +98,11 @@ npm run dev
 }
 
 Write-Host "`n[5/5] Running Environment Doctor Verification..." -ForegroundColor Cyan
-& $PyExe "$Root\doctor.py"
+& $PyExe -B "$Root\doctor.py"
 
 if ($SetupKeys) {
-    & $PyExe "$Root\.agents\skills\freecut-unified-engine\scripts\bootstrap_env.py" --setup-keys
+    & $PyExe -B "$Root\.agents\skills\freecut-unified-engine\scripts\bootstrap_env.py" --setup-keys
 } else {
-    Write-Host "`n[TIP] 0 API keys required! Want to add optional Groq/Pexels/ElevenLabs keys now or anytime later?" -ForegroundColor Green
-    Write-Host "      Run: python .agents\skills\freecut-unified-engine\scripts\bootstrap_env.py --setup-keys" -ForegroundColor Gray
+    Write-Host "`n[TIP] 0 API keys required! Want to add your FREE Pixabay HD key (pixabay.com/api/docs/) or optional Groq/ElevenLabs keys?" -ForegroundColor Green
+    Write-Host "      Run: python -B .agents\skills\freecut-unified-engine\scripts\bootstrap_env.py --setup-keys" -ForegroundColor Gray
 }

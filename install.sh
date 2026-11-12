@@ -58,18 +58,23 @@ if [[ ! -x "$ROOT_DIR/.venv/bin/python" ]]; then
   python3 -m venv "$ROOT_DIR/.venv"
 fi
 PY_EXE="$ROOT_DIR/.venv/bin/python"
-"$PY_EXE" -m pip install --upgrade pip
-"$PY_EXE" -m pip install -r "$ROOT_DIR/requirements.txt"
+"$PY_EXE" -B -m pip install --upgrade pip
+"$PY_EXE" -B -m pip install -r "$ROOT_DIR/requirements.txt"
 
 echo ""
 echo "[3/5] Installing Playwright Chromium headless renderer..."
-"$PY_EXE" -m playwright install chromium
+"$PY_EXE" -B -m playwright install chromium
 
 echo ""
 echo "[4/5] Syncing skills for all Frontier AIs (.agents/skills <-> .claude/skills)..."
 rm -rf "$ROOT_DIR/.claude/skills"
 mkdir -p "$ROOT_DIR/.claude/skills"
-cp -R "$ROOT_DIR/.agents/skills/"* "$ROOT_DIR/.claude/skills/"
+for sk in doc-art-director doc-lottie-overlays doc-motion-scenes freecut-unified-engine; do
+  if [[ -d "$ROOT_DIR/.agents/skills/$sk" ]]; then
+    cp -R "$ROOT_DIR/.agents/skills/$sk" "$ROOT_DIR/.claude/skills/$sk"
+    rm -f "$ROOT_DIR/.claude/skills/$sk/.openbot-managed.json"
+  fi
+done
 
 if [[ ! -f "$ROOT_DIR/.env" && -f "$ROOT_DIR/.env.example" ]]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
@@ -92,12 +97,12 @@ fi
 
 echo ""
 echo "[5/5] Running Environment Doctor Verification..."
-"$PY_EXE" "$ROOT_DIR/doctor.py"
+"$PY_EXE" -B "$ROOT_DIR/doctor.py"
 
 if [[ "$SETUP_KEYS" -eq 1 ]]; then
-  "$PY_EXE" "$ROOT_DIR/.agents/skills/freecut-unified-engine/scripts/bootstrap_env.py" --setup-keys
+  "$PY_EXE" -B "$ROOT_DIR/.agents/skills/freecut-unified-engine/scripts/bootstrap_env.py" --setup-keys
 else
   echo ""
-  echo "[TIP] 0 API keys required! To add optional Groq/Pexels/ElevenLabs keys anytime later without reinstalling:"
-  echo "      $PY_EXE .agents/skills/freecut-unified-engine/scripts/bootstrap_env.py --setup-keys"
+  echo "[TIP] 0 API keys required! To add your FREE Pixabay HD key (pixabay.com/api/docs/) or optional Groq/ElevenLabs keys anytime:"
+  echo "      $PY_EXE -B .agents/skills/freecut-unified-engine/scripts/bootstrap_env.py --setup-keys"
 fi
