@@ -1,11 +1,11 @@
 ---
 name: "freecut-unified-engine"
-description: "Universal standalone video production engine for walterlow/freecut (schemaVersion 15, v7.0) — Virgin-PC auto-setup, zero-freeze multi-shot B-roll, optical hero word fit, 5 press treatments, 6-zone typography, parallel Media Hunter + Subagent Vision QA, and 1-command finish_freecut.py pipeline."
+description: "Universal standalone video production engine for walterlow/freecut (schemaVersion 15 + Workspace v2 pre-cache, v7.1) — Virgin-PC auto-setup, instant Chrome cold-open caches (thumbnails, WFORM waveforms, 1fps filmstrips), zero-freeze multi-shot B-roll, optical hero word fit, 5 press treatments, 6-zone typography, and 1-command finish_freecut.py pipeline."
 ---
 
-# FreeCut Unified Engine (`freecut-unified-engine` v7.0)
+# FreeCut Unified Engine (`freecut-unified-engine` v7.1)
 
-Deterministic Python CLI pipeline turning **an audio file, a folder path (audio + optional `.srt`), a camera video, or a text script** into a creative, zero-freeze `walterlow/freecut` project (`freecut_workspace/` + `.freecut.zip`) — **100% standalone, zero mandatory paid APIs, zero `.pyc` pollution (`-B`), and context-safe for 10–20+ minute videos**.
+Deterministic Python CLI pipeline turning **an audio file, a folder path (audio + optional `.srt`), a camera video, or a text script** into a creative, zero-freeze, instant-opening `walterlow/freecut` project (`freecut_workspace/` + `.freecut.zip`) — **100% standalone, zero mandatory paid APIs, zero `.pyc` pollution (`-B`), and context-safe for 10–20+ minute videos**.
 
 All scripts live in `<SKILL_DIR>/scripts/` (always invoke `python -B`, or `python3 -B` on macOS/Linux).
 
@@ -61,13 +61,17 @@ python -B "<SKILL_DIR>/scripts/fetch_media.py" --project-dir "<project_dir>"
 
 ---
 
-## 3. One-Command v7.0 Finalizer (`finish_freecut.py` -> Stop at `freecut_workspace`!)
+## 3. One-Command v7.1 Finalizer (`finish_freecut.py` -> Stop at `freecut_workspace`!)
 After writing diverse `motion/SXX.html` scenes (`doc-motion-scenes`), run **one command**:
 ```bash
 python -B "<SKILL_DIR>/scripts/finish_freecut.py" --project-dir "<project_dir>"
 ```
 1. Generates all `lottie_overlay` JSONs in batch (`generate_lottie.py --project-dir`),
 2. Renders all `motion/*.html` in parallel (`ThreadPoolExecutor(max_workers=3)`) + builds 4-column `motion/motion_contact_sheet.jpg` (`20% / 50% / 78% / 94%` live-tail check),
-3. Assembles `freecut_workspace` + `<Title>.freecut.zip` with compound sub-shots (`<= 6.2s` per shot, zero video freeze), optical hero word fit, 5 rotating press treatments, and 6-zone negative-space typography,
-4. Runs strict `validate_freecut.py` v7.0 (`PASS` = 0 schema, freeze, highlighter-spam, or cloning errors).
+3. Assembles `freecut_workspace` + `<Title>.freecut.zip` with:
+   - **Exact Schema v15 Zero-Rewrite Parity** (`DEFAULT_TRACK_HEIGHT=100`, `animationVersion=2`, `[0,360)` rotations, integer frame `source*` on audio & video, `application/lottie+json`),
+   - **Pre-Baked Workspace v2 Cold-Open Caches** (`media/<id>/thumbnail.jpg`, `projects/<id>/thumbnail.jpg`, `cache/waveform/multi-res.bin` `WFORM` v1, and `cache/filmstrip/meta.json` v2 + `1fps` `0.jpg..N.jpg`),
+   - Compound sub-shots (`<= 6.2s` per shot, zero video freeze), optical hero word fit, 5 rotating press treatments, and 6-zone negative-space typography,
+4. Runs strict `validate_freecut.py` v7.1 (`PASS` = 0 schema, cold-open cache, freeze, highlighter-spam, or cloning errors).
 - Have **1 subagent** review `motion/motion_contact_sheet*.jpg` (re-running `finish_freecut.py --force-motion` if any HTML needed adjustment), then **STOP** (do NOT render `.mp4` unless requested) and deliver `<project_dir>/freecut_workspace`!
+- **Instant Open in Google Chrome**: Always instruct the user to select `<project_dir>/freecut_workspace` directly as the **Workspace Folder** in FreeCut (zero-copy, instant ~1–2s load using pre-baked caches), rather than using *Import Project (`.freecut.zip`)* which unzips hundreds of MB in browser RAM and re-copies files sequentially via Chrome File System Access API.

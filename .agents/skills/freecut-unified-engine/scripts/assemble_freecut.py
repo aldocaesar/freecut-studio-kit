@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-assemble_freecut.py (v7.0 — Zero-Freeze Sub-Shots, Optical Hero Fit, 5 Press Treatments & 6-Zone Negative-Space Typography)
+assemble_freecut.py (v7.1 — Instant Chrome Cold-Open Pre-Cache, Exact Schema v15 Zero-Rewrite Parity & Zero-Freeze Engine)
 ===========================================================================================================================
 Compiles a human-grade documentary timeline directly into:
-  1. `<project_dir>/freecut_workspace/` — Ready to open & render immediately in FreeCut (browser).
-  2. `<project_dir>/<SafeTitle>.freecut.zip` — Portable FreeCut project bundle.
+  1. `<project_dir>/freecut_workspace/` — Ready to open & render INSTANTLY in FreeCut (Workspace v2 pre-baked caches).
+  2. `<project_dir>/<SafeTitle>.freecut.zip` — Portable FreeCut project bundle (with `cover.jpg`).
 
-Strictly follows `walterlow/freecut` schemaVersion 15 (`vcy-AGOSTO` architecture, zero `FREECUT-card` boxes):
-  - Center-origin coordinates (`1920x1080`, `1080x1920`, `1080x1350`, `1080x1080`) @ 30fps.
-  - HARD ZERO-FREEZE INVARIANT: `durationInFrames <= sourceEnd - sourceStart <= sourceDuration` on 100% of video clips;
-    long beats (`> 6.2s`) or short B-roll MP4s auto-subdivide into 2–3 crisp sub-shots (`3.2s–5.5s` each).
-  - Optical glyph auto-scaling on monumental background words (zero `[:7]` truncation, zero bare single digits) +
-    left/center/right subject cutout staging.
-  - 5 Rotating Press Evidence Treatments (`tilted_3d_push`, `dossier_focus_brackets`, `pull_quote_editorial`,
-    `headline_underline_ink`, and RapidOCR-anchored `ocr_marker_highlight` capped at `<= 2` per 10 min).
-  - 35% Clean Visual Breathing Room + Subject-Aware 6-Zone Negative-Space Typography + Varied Transitions.
+Strictly follows `walterlow/freecut` schemaVersion 15 + Workspace Schema 2.0 (`5ceeeb3` parity):
+  - Zero-Rewrite Load (`didNormalizationChange === false`): `DEFAULT_TRACK_HEIGHT = 100`, `animationVersion: 2` on all
+    keyframes, `[0, 360)` rotations, integer frame `sourceStart/sourceEnd/sourceDuration` on both video & audio items,
+    `application/lottie+json` MIME on Lottie assets, and `masterBusDb`/`currentFrame`/`zoomLevel`/`scrollPosition`.
+  - Pre-Baked Workspace v2 Caches (`ThreadPoolExecutor`):
+    * `media/<id>/thumbnail.jpg` (`320x180`) + `projects/<id>/thumbnail.jpg` (`640x360` cover)
+    * `media/<id>/cache/waveform/multi-res.bin` (`WFORM` v1 binary header + 4 levels `[500, 100, 25, 10]`)
+    * `media/<id>/cache/filmstrip/meta.json` (`version: 2`, `isComplete: true`) + `1fps` `0.jpg..N.jpg` frames
+  - HARD ZERO-FREEZE INVARIANT: `durationInFrames <= sourceEnd - sourceStart <= sourceDuration` on 100% of video clips.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import glob
 import hashlib
 import json
@@ -25,8 +26,10 @@ import os
 import random
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 import wave
@@ -42,7 +45,7 @@ if _SCRIPT_DIR not in sys.path:
 import _runtime_env  # noqa: E402
 _runtime_env.init()
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 import numpy as np
 
 ASPECT_DIMENSIONS = {
@@ -55,6 +58,10 @@ ASPECT_DIMENSIONS = {
 CANVAS_W = 1920
 CANVAS_H = 1080
 FPS = 30
+DEFAULT_TRACK_HEIGHT = 100
+FILMSTRIP_EXTRACT_HEIGHT = 116
+FILMSTRIP_EXTRACT_WIDTH = 206
+WAVEFORM_LEVELS = (500, 100, 25, 10)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_SFX_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "assets", "sfx"))
@@ -65,7 +72,7 @@ TRACKS = [
         "id": "track_captions",
         "name": "Dynamic Subtitles",
         "kind": "video",
-        "height": 72,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -78,7 +85,7 @@ TRACKS = [
         "id": "track_text",
         "name": "Text & Editorial Titles",
         "kind": "video",
-        "height": 96,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -91,7 +98,7 @@ TRACKS = [
         "id": "track_fg_3",
         "name": "Lottie & Vector Overlays",
         "kind": "video",
-        "height": 88,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -104,7 +111,7 @@ TRACKS = [
         "id": "track_fg_2",
         "name": "Foreground Cutouts",
         "kind": "video",
-        "height": 88,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -117,7 +124,7 @@ TRACKS = [
         "id": "track_fg_1",
         "name": "Film & Analog Grade (GPU)",
         "kind": "video",
-        "height": 84,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -130,7 +137,7 @@ TRACKS = [
         "id": "track_anchor",
         "name": "Main Visuals (Anchor)",
         "kind": "video",
-        "height": 110,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -143,7 +150,7 @@ TRACKS = [
         "id": "track_bg",
         "name": "Atmospheric Backdrop",
         "kind": "video",
-        "height": 96,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -156,7 +163,7 @@ TRACKS = [
         "id": "track_sfx",
         "name": "Sound Effects (SFX)",
         "kind": "audio",
-        "height": 80,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -169,7 +176,7 @@ TRACKS = [
         "id": "track_audio",
         "name": "Narration (VO)",
         "kind": "audio",
-        "height": 100,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -182,7 +189,7 @@ TRACKS = [
         "id": "track_bgm",
         "name": "Music Bed (BGM)",
         "kind": "audio",
-        "height": 76,
+        "height": DEFAULT_TRACK_HEIGHT,
         "locked": False,
         "visible": True,
         "muted": False,
@@ -259,12 +266,27 @@ def last_kf(dur_f: int) -> int:
     return max(0, int(dur_f) - 1)
 
 
+_PROBE_CACHE: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
+_SHA256_CACHE: Dict[Tuple[str, int, int], str] = {}
+
+
 def compute_sha256(filepath: str) -> str:
+    abs_p = os.path.abspath(filepath)
+    try:
+        st = os.stat(abs_p)
+        ckey = (abs_p, int(st.st_mtime_ns), int(st.st_size))
+        if ckey in _SHA256_CACHE:
+            return _SHA256_CACHE[ckey]
+    except Exception:
+        ckey = None
     h = hashlib.sha256()
-    with open(filepath, "rb") as f:
+    with open(abs_p, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
-    return h.hexdigest()
+    digest = h.hexdigest()
+    if ckey is not None:
+        _SHA256_CACHE[ckey] = digest
+    return digest
 
 
 def detect_mime(path: str) -> str:
@@ -285,43 +307,82 @@ def detect_mime(path: str) -> str:
         ".oga": "audio/ogg",
         ".opus": "audio/ogg",
         ".flac": "audio/flac",
-        ".json": "application/json",
-        ".lottie": "application/octet-stream",
+        ".json": "application/lottie+json",
+        ".lottie": "application/lottie+json",
     }.get(ext, "application/octet-stream")
 
 
 def probe_media(filepath: str) -> Dict[str, Any]:
-    mime = detect_mime(filepath)
-    if mime == "application/json":
+    abs_p = os.path.abspath(filepath)
+    try:
+        st = os.stat(abs_p)
+        ckey = (abs_p, int(st.st_mtime_ns), int(st.st_size))
+        if ckey in _PROBE_CACHE:
+            return dict(_PROBE_CACHE[ckey])
+    except Exception:
+        ckey = None
+
+    mime = detect_mime(abs_p)
+    if mime == "application/lottie+json":
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(abs_p, "r", encoding="utf-8") as f:
                 d = json.load(f)
             fr = float(d.get("fr", 30) or 30)
             frames = max(1.0, float(d.get("op", 90)) - float(d.get("ip", 0)))
-            return {
+            out = {
                 "width": int(d.get("w", 1920)),
                 "height": int(d.get("h", 1080)),
                 "duration": round(max(0.5, frames / fr), 3),
                 "fps": int(round(fr)),
                 "total_frames": max(1, int(round(frames))),
                 "codec": "lottie",
+                "audio_codec": None,
+                "channels": 0,
             }
         except Exception:
-            return {"width": 1920, "height": 1080, "duration": 3.0, "fps": 30, "total_frames": 90, "codec": "lottie"}
+            out = {
+                "width": 1920,
+                "height": 1080,
+                "duration": 3.0,
+                "fps": 30,
+                "total_frames": 90,
+                "codec": "lottie",
+                "audio_codec": None,
+                "channels": 0,
+            }
+        if ckey is not None:
+            _PROBE_CACHE[ckey] = dict(out)
+        return out
 
     if mime.startswith("image/"):
         try:
-            with Image.open(filepath) as im:
+            with Image.open(abs_p) as im:
                 w, h = im.size
-            return {"width": w, "height": h, "duration": 0.0, "fps": FPS, "codec": "image"}
+            out = {"width": w, "height": h, "duration": 0.0, "fps": FPS, "codec": "image", "audio_codec": None, "channels": 0}
         except Exception:
-            return {"width": 1920, "height": 1080, "duration": 0.0, "fps": FPS, "codec": "image"}
+            out = {"width": 1920, "height": 1080, "duration": 0.0, "fps": FPS, "codec": "image", "audio_codec": None, "channels": 0}
+        if ckey is not None:
+            _PROBE_CACHE[ckey] = dict(out)
+        return out
 
-    if filepath.lower().endswith(".wav"):
+    if abs_p.lower().endswith(".wav"):
         try:
-            with wave.open(filepath, "rb") as wf:
+            with wave.open(abs_p, "rb") as wf:
                 dur = wf.getnframes() / float(wf.getframerate())
-            return {"width": 0, "height": 0, "duration": round(dur, 4), "fps": FPS, "codec": "pcm_s16le"}
+                nch = max(1, min(2, int(wf.getnchannels() or 1)))
+            out = {
+                "width": 0,
+                "height": 0,
+                "duration": round(dur, 4),
+                "fps": FPS,
+                "codec": "pcm_s16le",
+                "audio_codec": "pcm_s16le",
+                "channels": nch,
+                "audio_codec_supported": True,
+            }
+            if ckey is not None:
+                _PROBE_CACHE[ckey] = dict(out)
+            return out
         except Exception:
             pass
 
@@ -334,38 +395,404 @@ def probe_media(filepath: str) -> Dict[str, Any]:
             "json",
             "-show_format",
             "-show_streams",
-            filepath,
+            abs_p,
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
         info = json.loads(res.stdout or "{}")
         fmt_dur = float(info.get("format", {}).get("duration", 0.0) or 0.0)
-        w, h, codec, fps = 0, 0, "unknown", FPS
-        for st in info.get("streams", []):
-            if st.get("codec_type") == "video":
-                w = int(st.get("width", 1920) or 1920)
-                h = int(st.get("height", 1080) or 1080)
-                codec = st.get("codec_name", "h264")
-                r_fps = st.get("r_frame_rate", "30/1")
+        w, h, v_codec, a_codec, fps, channels = 0, 0, None, None, FPS, 0
+        for st_obj in info.get("streams", []):
+            ctype = st_obj.get("codec_type")
+            if ctype == "video" and v_codec is None:
+                w = int(st_obj.get("width", 1920) or 1920)
+                h = int(st_obj.get("height", 1080) or 1080)
+                v_codec = st_obj.get("codec_name", "h264")
+                r_fps = st_obj.get("r_frame_rate", "30/1")
                 if "/" in r_fps:
                     num, den = r_fps.split("/", 1)
                     if float(den) > 0:
                         fps = int(round(float(num) / float(den)))
-                if fmt_dur <= 0 and st.get("duration"):
-                    fmt_dur = float(st["duration"])
-                break
-            elif st.get("codec_type") == "audio" and codec == "unknown":
-                codec = st.get("codec_name", "mp3")
-                if fmt_dur <= 0 and st.get("duration"):
-                    fmt_dur = float(st["duration"])
-        return {
+                if fmt_dur <= 0 and st_obj.get("duration"):
+                    fmt_dur = float(st_obj["duration"])
+            elif ctype == "audio" and a_codec is None:
+                a_codec = st_obj.get("codec_name", "aac")
+                channels = max(1, min(2, int(st_obj.get("channels", 1) or 1)))
+                if fmt_dur <= 0 and st_obj.get("duration"):
+                    fmt_dur = float(st_obj["duration"])
+        primary_codec = v_codec or a_codec or "unknown"
+        out = {
             "width": w,
             "height": h,
             "duration": round(max(0.1, fmt_dur), 4),
             "fps": fps or FPS,
-            "codec": codec,
+            "codec": primary_codec,
+            "audio_codec": a_codec,
+            "channels": channels,
+            "video_codec_supported": True if v_codec else None,
+            "audio_codec_supported": True if a_codec else None,
         }
     except Exception:
-        return {"width": 1920 if mime.startswith("video/") else 0, "height": 1080 if mime.startswith("video/") else 0, "duration": 1.0, "fps": FPS, "codec": "unknown"}
+        is_vid = mime.startswith("video/")
+        is_aud = mime.startswith("audio/")
+        out = {
+            "width": 1920 if is_vid else 0,
+            "height": 1080 if is_vid else 0,
+            "duration": 1.0,
+            "fps": FPS,
+            "codec": "unknown",
+            "audio_codec": "mp3" if is_aud else None,
+            "channels": 1 if is_aud else 0,
+            "video_codec_supported": True if is_vid else None,
+            "audio_codec_supported": True if is_aud else None,
+        }
+    if ckey is not None:
+        _PROBE_CACHE[ckey] = dict(out)
+    return out
+
+
+def _fit_filmstrip_size(src_w: int, src_h: int) -> Tuple[int, int]:
+    """Mirrors FreeCut `fitFilmstripFrameSize(sourceWidth, sourceHeight, 206, 116)` using JS half-up rounding."""
+    if src_w <= 0 or src_h <= 0:
+        return (FILMSTRIP_EXTRACT_WIDTH, FILMSTRIP_EXTRACT_HEIGHT)
+    scale = min(FILMSTRIP_EXTRACT_WIDTH / float(src_w), FILMSTRIP_EXTRACT_HEIGHT / float(src_h))
+    fw = max(1, int(math.floor(src_w * scale + 0.5)))
+    fh = max(1, int(math.floor(src_h * scale + 0.5)))
+    return (fw, fh)
+
+
+def _pack_multires_waveform_bytes(duration_s: float, peaks_500: np.ndarray) -> bytes:
+    """Packs FreeCut `WFORM` v1 binary (`media/<id>/cache/waveform/multi-res.bin`, 48B header + 4x12B index + <f4 peaks)."""
+    dur = max(0.05, float(duration_s))
+    n_500 = max(1, int(math.ceil(dur * 500)))
+    p0 = np.asarray(peaks_500, dtype=np.float32).reshape(-1)
+    if p0.size < n_500:
+        p0 = np.pad(p0, (0, n_500 - p0.size), mode="constant", constant_values=0.0)
+    elif p0.size > n_500:
+        p0 = p0[:n_500]
+    p0 = np.clip(p0, 0.0, 1.0).astype("<f4", copy=False)
+
+    level_arrays: List[Tuple[int, np.ndarray]] = [(500, p0)]
+    for rate in (100, 25, 10):
+        n_lvl = max(1, int(math.ceil(dur * rate)))
+        ratio = 500 // rate  # exact divisors: 5, 20, 50
+        needed = n_lvl * ratio
+        padded = np.pad(p0, (0, max(0, needed - p0.size)), mode="constant", constant_values=0.0)[:needed]
+        lvl_peaks = np.max(padded.reshape(n_lvl, ratio), axis=1).astype("<f4", copy=False)
+        level_arrays.append((rate, lvl_peaks))
+
+    header = struct.pack("<5sBfBB36x", b"WFORM", 1, float(dur), 1, len(level_arrays))
+    index_parts: List[bytes] = []
+    data_parts: List[bytes] = []
+    data_offset = 48 + 12 * len(level_arrays)  # 96
+    for rate, arr in level_arrays:
+        raw_bytes = arr.tobytes()
+        index_parts.append(struct.pack("<HIIH", int(rate), int(arr.size), int(data_offset), 0))
+        data_parts.append(raw_bytes)
+        data_offset += len(raw_bytes)
+    return header + b"".join(index_parts) + b"".join(data_parts)
+
+
+def _extract_peaks_500_from_audio(filepath: str, duration_s: float, has_audio: bool) -> np.ndarray:
+    """Extracts 500Hz peak envelope (`[0.0, 1.0]`) in ~0.05–0.18s via mono 8kHz s16le pipe (16 samples/bucket)."""
+    n_500 = max(1, int(math.ceil(max(0.05, float(duration_s)) * 500)))
+    if not has_audio:
+        return np.zeros(n_500, dtype=np.float32)
+    try:
+        res = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", filepath, "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=60,
+        )
+        raw = res.stdout or b""
+        if len(raw) >= 2:
+            n_i16 = len(raw) // 2
+            pcm = np.frombuffer(raw[: n_i16 * 2], dtype="<i2")
+            needed = n_500 * 16
+            if pcm.size < needed:
+                pcm = np.pad(pcm, (0, needed - pcm.size), mode="constant", constant_values=0)
+            else:
+                pcm = pcm[:needed]
+            peaks = np.max(np.abs(pcm.reshape(n_500, 16).astype(np.float32)), axis=1) / 32768.0
+            return np.clip(peaks, 0.0, 1.0)
+    except Exception:
+        pass
+    return np.zeros(n_500, dtype=np.float32)
+
+
+def _save_image_thumbnail_jpeg(src_img_path: str, dst_jpg_path: str, target_w: int = 320, target_h: int = 180) -> bool:
+    """Writes a crisp letterboxed/fitted RGB JPEG thumbnail (`320x180` for media library, `640x360` for project cover)."""
+    try:
+        with Image.open(src_img_path) as im:
+            canvas = Image.new("RGB", (target_w, target_h), (11, 14, 20))
+            if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+                rgba = im.convert("RGBA")
+                fitted = ImageOps.contain(rgba, (target_w, target_h), method=Image.Resampling.LANCZOS)
+                ox = (target_w - fitted.width) // 2
+                oy = (target_h - fitted.height) // 2
+                canvas.paste(fitted.convert("RGB"), (ox, oy), fitted.split()[3])
+            else:
+                rgb = im.convert("RGB")
+                fitted = ImageOps.fit(rgb, (target_w, target_h), method=Image.Resampling.LANCZOS)
+                canvas.paste(fitted, (0, 0))
+            os.makedirs(os.path.dirname(dst_jpg_path), exist_ok=True)
+            canvas.save(dst_jpg_path, format="JPEG", quality=82, optimize=True)
+        return os.path.isfile(dst_jpg_path) and os.path.getsize(dst_jpg_path) > 0
+    except Exception:
+        return False
+
+
+def _prebake_workspace_media_entry(task: Dict[str, Any]) -> None:
+    """Worker: writes media copy, `metadata.json`, `thumbnail.jpg`, `cache/waveform/multi-res.bin` & `cache/filmstrip/`."""
+    mid = task["mid"]
+    mdir = task["mdir"]
+    src_p = task["src_path"]
+    entry = task["entry"]
+    extra = task["extra"]
+    now_ms = task["now_ms"]
+
+    os.makedirs(mdir, exist_ok=True)
+    dst_media_p = os.path.join(mdir, entry["fileName"])
+    shutil.copy2(src_p, dst_media_p)
+
+    mime = entry["mimeType"]
+    dur_s = float(entry["metadata"]["duration"] or 0.0)
+    src_w = int(entry["metadata"]["width"] or 0)
+    src_h = int(entry["metadata"]["height"] or 0)
+    has_thumb = False
+    thumb_path = os.path.join(mdir, "thumbnail.jpg")
+
+    if mime.startswith("image/"):
+        has_thumb = _save_image_thumbnail_jpeg(src_p, thumb_path, 320, 180)
+
+    elif mime.startswith("video/"):
+        fw, fh = _fit_filmstrip_size(src_w, src_h)
+        frame_count = max(1, int(math.ceil(max(0.1, dur_s) * 1.0)))
+        fstrip_dir = os.path.join(mdir, "cache", "filmstrip")
+        os.makedirs(fstrip_dir, exist_ok=True)
+        has_audio = bool(extra.get("audio_codec"))
+        pcm_tmp_path = os.path.join(mdir, "_tmp_wf.s16le") if has_audio else None
+
+        ff_cmd = [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            src_p,
+            "-an",
+            "-vf",
+            f"fps=1,scale={fw}:{fh},format=yuvj444p",
+            "-q:v",
+            "6",
+            "-start_number",
+            "0",
+            os.path.join(fstrip_dir, "%d.jpg"),
+        ]
+        if pcm_tmp_path:
+            ff_cmd.extend(["-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", pcm_tmp_path])
+
+        subprocess.run(ff_cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=90)
+
+        # Ensure contiguous `0.jpg .. {frame_count - 1}.jpg` exist and are > 0 bytes
+        existing_jpgs = sorted(
+            [p for p in glob.glob(os.path.join(fstrip_dir, "*.jpg")) if os.path.getsize(p) > 0],
+            key=lambda p: int(os.path.splitext(os.path.basename(p))[0]) if os.path.splitext(os.path.basename(p))[0].isdigit() else 999999,
+        )
+        if not existing_jpgs:
+            fallback_im = Image.new("RGB", (fw, fh), (14, 18, 26))
+            p0 = os.path.join(fstrip_dir, "0.jpg")
+            fallback_im.save(p0, format="JPEG", quality=78)
+            existing_jpgs = [p0]
+
+        last_valid = existing_jpgs[0]
+        for f_idx in range(frame_count):
+            fp = os.path.join(fstrip_dir, f"{f_idx}.jpg")
+            if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+                last_valid = fp
+            else:
+                shutil.copy2(last_valid, fp)
+        # Remove any extra trailing frame beyond `frame_count - 1` so `existingIndices` matches `frameCount`
+        for extra_fp in glob.glob(os.path.join(fstrip_dir, "*.jpg")):
+            stem = os.path.splitext(os.path.basename(extra_fp))[0]
+            if stem.isdigit() and int(stem) >= frame_count:
+                try:
+                    os.remove(extra_fp)
+                except OSError:
+                    pass
+
+        with open(os.path.join(fstrip_dir, "meta.json"), "w", encoding="utf-8") as mf:
+            json.dump(
+                {
+                    "width": fw,
+                    "height": fh,
+                    "isComplete": True,
+                    "frameCount": frame_count,
+                    "version": 2,
+                },
+                mf,
+                separators=(",", ":"),
+            )
+
+        pick_idx = min(1, frame_count - 1)
+        pick_frame_p = os.path.join(fstrip_dir, f"{pick_idx}.jpg")
+        has_thumb = _save_image_thumbnail_jpeg(pick_frame_p, thumb_path, 320, 180)
+
+        # Pre-bake `cache/waveform/multi-res.bin` so `useWaveformPrefetch` hits cache immediately
+        wf_dir = os.path.join(mdir, "cache", "waveform")
+        os.makedirs(wf_dir, exist_ok=True)
+        n_500 = max(1, int(math.ceil(max(0.05, dur_s) * 500)))
+        peaks_500 = np.zeros(n_500, dtype=np.float32)
+        if pcm_tmp_path and os.path.isfile(pcm_tmp_path):
+            try:
+                raw = open(pcm_tmp_path, "rb").read()
+                if len(raw) >= 2:
+                    n_i16 = len(raw) // 2
+                    pcm = np.frombuffer(raw[: n_i16 * 2], dtype="<i2")
+                    needed = n_500 * 16
+                    pcm = np.pad(pcm, (0, max(0, needed - pcm.size)), mode="constant", constant_values=0)[:needed]
+                    peaks_500 = np.clip(np.max(np.abs(pcm.reshape(n_500, 16).astype(np.float32)), axis=1) / 32768.0, 0.0, 1.0)
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(pcm_tmp_path)
+                except OSError:
+                    pass
+        with open(os.path.join(wf_dir, "multi-res.bin"), "wb") as wf_f:
+            wf_f.write(_pack_multires_waveform_bytes(max(0.1, dur_s), peaks_500))
+
+    elif mime.startswith("audio/"):
+        wf_dir = os.path.join(mdir, "cache", "waveform")
+        os.makedirs(wf_dir, exist_ok=True)
+        peaks_500 = _extract_peaks_500_from_audio(src_p, max(0.1, dur_s), True)
+        with open(os.path.join(wf_dir, "multi-res.bin"), "wb") as wf_f:
+            wf_f.write(_pack_multires_waveform_bytes(max(0.1, dur_s), peaks_500))
+
+    try:
+        file_mtime_ms = int(os.path.getmtime(src_p) * 1000)
+    except Exception:
+        file_mtime_ms = now_ms
+
+    meta_doc: Dict[str, Any] = {
+        "id": mid,
+        "storageType": "workspace",
+        "fileName": entry["fileName"],
+        "fileSize": entry["fileSize"],
+        "fileLastModified": file_mtime_ms,
+        "mimeType": mime,
+        "contentHash": entry["sha256"],
+        "duration": entry["metadata"]["duration"],
+        "width": src_w,
+        "height": src_h,
+        "fps": entry["metadata"]["fps"],
+        "codec": entry["metadata"]["codec"],
+        "bitrate": 0,
+        "tags": [],
+        "createdAt": now_ms,
+        "updatedAt": now_ms,
+    }
+    if has_thumb:
+        meta_doc["thumbnailId"] = mid
+    if extra.get("audio_codec"):
+        meta_doc["audioCodec"] = extra["audio_codec"]
+    if extra.get("video_codec_supported") is not None:
+        meta_doc["videoCodecSupported"] = bool(extra["video_codec_supported"])
+    if extra.get("audio_codec_supported") is not None:
+        meta_doc["audioCodecSupported"] = bool(extra["audio_codec_supported"])
+
+    with open(os.path.join(mdir, "metadata.json"), "w", encoding="utf-8") as f:
+        json.dump(meta_doc, f, indent=2, ensure_ascii=False)
+
+
+def _v8_canonical_numbers(obj: Any) -> Any:
+    """Converts whole-number floats (`0.0 -> 0`) recursively so Python `json.dumps` matches Chrome V8 `JSON.stringify`."""
+    if isinstance(obj, bool) or obj is None or isinstance(obj, (int, str)):
+        return obj
+    if isinstance(obj, float):
+        return int(obj) if math.isfinite(obj) and obj.is_integer() else obj
+    if isinstance(obj, list):
+        return [_v8_canonical_numbers(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _v8_canonical_numbers(v) for k, v in obj.items()}
+    return obj
+
+
+def _sanitize_for_freecut_v15(
+    items: List[Dict[str, Any]],
+    all_keyframes: List[Dict[str, Any]],
+    transitions_list: List[Dict[str, Any]],
+) -> None:
+    """Ensures `didNormalizationChange(original, normalizeProject(original))` is strictly `false` on first Chrome open."""
+    for kf_entry in all_keyframes:
+        kf_entry["animationVersion"] = 2
+
+    trans_pairs = set()
+    for tr in transitions_list:
+        lc, rc = tr.get("leftClipId"), tr.get("rightClipId")
+        if lc and rc:
+            trans_pairs.add((lc, rc))
+            trans_pairs.add((rc, lc))
+        tr["durationInFrames"] = max(1, int(round(tr.get("durationInFrames", 10))))
+        if not tr.get("timing") or tr.get("timing") == "spring":
+            tr["timing"] = "linear"
+
+    by_track: Dict[str, List[Dict[str, Any]]] = {}
+    for it in items:
+        it["from"] = max(0, int(round(it.get("from", 0))))
+        it["durationInFrames"] = max(1, int(round(it.get("durationInFrames", 1))))
+        for frame_k in ("sourceStart", "sourceEnd", "sourceDuration", "trimStart", "trimEnd"):
+            if frame_k in it and it[frame_k] is not None:
+                it[frame_k] = max(0, int(round(float(it[frame_k]))))
+        if it.get("type") == "video":
+            it["volume"] = 0
+            it["embeddedAudioMuted"] = True
+        elif "volume" in it and it["volume"] is not None:
+            v = max(-60.0, min(12.0, float(it["volume"])))
+            it["volume"] = int(v) if v == int(v) else round(v, 2)
+
+        tr_obj = it.get("transform")
+        if isinstance(tr_obj, dict):
+            if "rotation" in tr_obj and tr_obj["rotation"] is not None:
+                # Snap to quarter-degree dyadic binary floats (.0, .25, .5, .75) so V8 `((r % 360) + 360) % 360 === r` bit-for-bit!
+                rot_q = round(float(tr_obj["rotation"]) * 4.0) / 4.0
+                rot = ((rot_q % 360.0) + 360.0) % 360.0
+                tr_obj["rotation"] = int(rot) if rot.is_integer() else rot
+            if "opacity" in tr_obj and tr_obj["opacity"] is not None:
+                op = max(0.0, min(1.0, float(tr_obj["opacity"])))
+                tr_obj["opacity"] = int(op) if op in (0.0, 1.0) else round(op, 4)
+            if "cornerRadius" in tr_obj and tr_obj["cornerRadius"] is not None:
+                tr_obj["cornerRadius"] = max(0, int(round(float(tr_obj["cornerRadius"]))))
+
+        by_track.setdefault(it["trackId"], []).append(it)
+
+    # Guarantee zero unintentional same-track overlaps so `repairOverlappingItems` never shifts anything on load
+    item_dur_lookup: Dict[str, int] = {}
+    for tid, group in by_track.items():
+        group.sort(key=lambda x: x["from"])
+        for i in range(len(group)):
+            cur = group[i]
+            cur_end = cur["from"] + cur["durationInFrames"]
+            for j in range(i + 1, len(group)):
+                nxt = group[j]
+                if nxt["from"] >= cur_end:
+                    break
+                if (cur["id"], nxt["id"]) in trans_pairs:
+                    continue
+                nxt["from"] = cur_end
+    for it in items:
+        item_dur_lookup[it["id"]] = it["durationInFrames"]
+
+    # Clamp keyframes strictly inside `[0, durationInFrames - 1]` after any overlap nudge
+    for kf_entry in all_keyframes:
+        cdur = item_dur_lookup.get(kf_entry.get("itemId", ""), 1)
+        max_f = max(0, cdur - 1)
+        for prop in kf_entry.get("properties", []):
+            seen_f = {}
+            for kf in prop.get("keyframes", []):
+                kf["frame"] = max(0, min(max_f, int(round(kf.get("frame", 0)))))
+                seen_f[kf["frame"]] = kf
+            prop["keyframes"] = [seen_f[k] for k in sorted(seen_f.keys())]
 
 
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
@@ -1558,6 +1985,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
     media_files_to_zip: List[Tuple[str, str]] = []
     seen_media_ids = set()
     media_id_to_filepath: Dict[str, str] = {}
+    media_id_to_extra: Dict[str, Dict[str, Any]] = {}
     used_zip_names = set()
 
     def register_media(filepath: str) -> Tuple[str, Dict[str, Any]]:
@@ -1566,6 +1994,12 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         media_id = str(uuid.uuid5(uuid.NAMESPACE_OID, sha256))
         meta = probe_media(abs_p)
         media_id_to_filepath[media_id] = abs_p
+        media_id_to_extra[media_id] = {
+            "audio_codec": meta.get("audio_codec"),
+            "channels": meta.get("channels", 0),
+            "video_codec_supported": meta.get("video_codec_supported"),
+            "audio_codec_supported": meta.get("audio_codec_supported"),
+        }
         if media_id in seen_media_ids:
             return media_id, meta
         seen_media_ids.add(media_id)
@@ -1598,23 +2032,25 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         media_files_to_zip.append((abs_p, rel_path))
         return media_id, meta
 
-    # 1. Master Narration Audio (`track_audio`)
+    # 1. Master Narration Audio (`track_audio` — integer frame `source*` + `0` dB unity gain)
     vo_media_id, vo_meta = register_media(narration_path)
     vo_item_id = det_uid(f"{project_id}_vo")
     vo_dur_s = round(vo_meta["duration"], 4)
+    vo_dur_f = ms_to_frames(vo_dur_s * 1000.0)
     items.append(
         {
             "id": vo_item_id,
             "trackId": "track_audio",
             "from": 0,
-            "durationInFrames": ms_to_frames(vo_dur_s * 1000.0),
+            "durationInFrames": vo_dur_f,
             "label": os.path.basename(narration_path),
             "type": "audio",
             "mediaRef": vo_media_id,
-            "sourceStart": 0.0,
-            "sourceEnd": vo_dur_s,
-            "sourceDuration": vo_dur_s,
-            "volume": 1.0,
+            "sourceStart": 0,
+            "sourceEnd": vo_dur_f,
+            "sourceDuration": vo_dur_f,
+            "sourceFps": FPS,
+            "volume": 0,
             "originId": vo_item_id,
         }
     )
@@ -1626,19 +2062,22 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         if os.path.isfile(bgm_full):
             bgm_mid, bgm_meta = register_media(bgm_full)
             bgm_id = det_uid(f"{project_id}_bgm")
+            bgm_src_dur_f = max(1, int(round(bgm_meta["duration"] * FPS)))
             bgm_dur_s = round(min(bgm_meta["duration"], total_dur_ms / 1000.0), 4)
+            bgm_take_f = min(bgm_src_dur_f, ms_to_frames(bgm_dur_s * 1000.0))
             items.append(
                 {
                     "id": bgm_id,
                     "trackId": "track_bgm",
                     "from": 0,
-                    "durationInFrames": ms_to_frames(bgm_dur_s * 1000.0),
+                    "durationInFrames": bgm_take_f,
                     "label": os.path.basename(bgm_full),
                     "type": "audio",
                     "mediaRef": bgm_mid,
-                    "sourceStart": 0.0,
-                    "sourceEnd": bgm_dur_s,
-                    "sourceDuration": round(bgm_meta["duration"], 4),
+                    "sourceStart": 0,
+                    "sourceEnd": bgm_take_f,
+                    "sourceDuration": bgm_src_dur_f,
+                    "sourceFps": FPS,
                     "volume": float(storyboard.get("bgm_db", -20.5)),
                     "originId": bgm_id,
                 }
@@ -1668,14 +2107,15 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         except Exception:
             pass
 
-    # 2. Build Scene Items
+    # 2. Build Scene Items (gapless & zero-overlap frame boundaries)
     for idx, scene in enumerate(scenes):
         sid = scene["id"]
         start_ms = float(scene["start_ms"])
         end_ms = float(scene["end_ms"])
         dur_ms = max(400.0, end_ms - start_ms)
         start_f = int(round((start_ms / 1000.0) * FPS))
-        dur_f = ms_to_frames(dur_ms)
+        end_f = max(start_f + 12, int(round((end_ms / 1000.0) * FPS)))
+        dur_f = end_f - start_f
         end_kf = last_kf(dur_f)
 
         raw_layout = (scene.get("layout") or scene.get("scene_type") or scene.get("layout_style") or "full_bleed_ken_burns").lower().strip()
@@ -2752,7 +3192,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
 
             print_x = int(CANVAS_W * 0.16) if is_pull_quote else 0
             print_y = -18 if scene.get("caption") else 0
-            init_rot = -1.6 if ev_variant == "tilted_3d_push" else (1.1 if is_pull_quote else -0.4)
+            init_rot = 358.5 if ev_variant == "tilted_3d_push" else (1.0 if is_pull_quote else 359.5)
 
             items.append(
                 {
@@ -2803,8 +3243,8 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                         {
                             "property": "rotation",
                             "keyframes": [
-                                {"id": get_uid(), "frame": 0, "value": -1.6, "easing": "ease-out"},
-                                {"id": get_uid(), "frame": end_kf, "value": -0.2, "easing": "linear"},
+                                {"id": get_uid(), "frame": 0, "value": 358.5, "easing": "ease-out"},
+                                {"id": get_uid(), "frame": end_kf, "value": 359.75, "easing": "linear"},
                             ],
                         }
                     )
@@ -3016,7 +3456,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                     l_mid, l_meta = register_media(lfull)
                     if l_idx == 0 and l_track == "track_anchor":
                         l_id = anchor_item_id
-                    actual_t = "lottie" if lfull.endswith(".json") else ("video" if detect_mime(lfull).startswith("video/") else "image")
+                    actual_t = "lottie" if lfull.lower().endswith((".json", ".lottie")) else ("video" if detect_mime(lfull).startswith("video/") else "image")
                     item_obj: Dict[str, Any] = {
                         "id": l_id,
                         "trackId": l_track,
@@ -3159,8 +3599,9 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 sfx_path, sfx_db = picked
                 sfx_mid, sfx_meta = register_media(sfx_path)
                 sfx_id = det_uid(f"{sid}_sfx")
+                sfx_src_dur_f = max(1, int(round(sfx_meta["duration"] * FPS)))
                 sfx_dur_s = round(min(1.4, sfx_meta["duration"]), 4)
-                sfx_dur_f = max(4, min(dur_f, int(round(sfx_dur_s * FPS))))
+                sfx_dur_f = max(4, min(dur_f, sfx_src_dur_f, int(round(sfx_dur_s * FPS))))
                 items.append(
                     {
                         "id": sfx_id,
@@ -3170,9 +3611,10 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                         "label": os.path.basename(sfx_path),
                         "type": "audio",
                         "mediaRef": sfx_mid,
-                        "sourceStart": 0.0,
-                        "sourceEnd": sfx_dur_s,
-                        "sourceDuration": round(sfx_meta["duration"], 4),
+                        "sourceStart": 0,
+                        "sourceEnd": sfx_dur_f,
+                        "sourceDuration": sfx_src_dur_f,
+                        "sourceFps": FPS,
                         "volume": sfx_db,
                         "originId": sfx_id,
                     }
@@ -3257,9 +3699,11 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
         cap_y = int(CANVAS_H * 0.28) if is_vertical else int(CANVAS_H * 0.39)
         cap_w = int(CANVAS_W * (0.86 if is_vertical else 0.72))
         cap_fs = 50 if is_vertical else 42
+        prev_cap_end_f = 0
         for c_idx, ch_words in enumerate(chunks):
-            cs_f = int(round((ch_words[0]["start_ms"] / 1000.0) * FPS))
+            cs_f = max(prev_cap_end_f, int(round((ch_words[0]["start_ms"] / 1000.0) * FPS)))
             ce_f = max(cs_f + 6, int(round((ch_words[-1]["end_ms"] / 1000.0) * FPS)))
+            prev_cap_end_f = ce_f
             cdur = ce_f - cs_f
             ctxt = " ".join(str(x["word"]) for x in ch_words).strip()
             if not ctxt:
@@ -3282,7 +3726,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                     "verticalAlign": "middle",
                     "lineHeight": 1.15,
                     "letterSpacing": -0.5,
-                    "transform": {"x": 0, "y": cap_y, "width": cap_w, "height": 130, "scaleX": 1.0, "scaleY": 1.0, "rotation": 0.0},
+                    "transform": {"x": 0, "y": cap_y, "width": cap_w, "height": 130, "scaleX": 1.0, "scaleY": 1.0, "rotation": 0},
                     "stroke": {"width": 4, "color": "rgba(0,0,0,0.88)"},
                     "textShadow": {"offsetX": 0, "offsetY": 4, "blur": 14, "color": "rgba(0,0,0,0.85)"},
                     "textMotion": build_text_motion("pop", None, cdur),
@@ -3290,15 +3734,21 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 }
             )
 
-    # 4. Write `<SafeTitle>.freecut.zip` + `freecut_workspace/`
+    # 3c. Enforce Zero-Rewrite Schema v15 Normalization Parity before writing JSON
+    _sanitize_for_freecut_v15(items, all_keyframes, transitions_list)
+
+    # 4. Build Workspace v2 (`freecut_workspace/` with Parallel Cold-Open Pre-Caches) + `<SafeTitle>.freecut.zip`
+    t_cache_start = time.time()
     now_ms = int(time.time() * 1000)
-    project_json = {
+    cover_thumb_id = f"project:{project_id}:cover"
+    project_json: Dict[str, Any] = {
         "id": project_id,
         "name": safe_title,
         "description": f"Human-Grade Documentary Timeline — {title}",
         "createdAt": now_ms,
         "updatedAt": now_ms,
         "duration": round(total_dur_ms / 1000.0, 3),
+        "thumbnailId": cover_thumb_id,
         "metadata": {
             "width": CANVAS_W,
             "height": CANVAS_H,
@@ -3310,31 +3760,14 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             "items": items,
             "transitions": transitions_list,
             "keyframes": all_keyframes,
+            "masterBusDb": 0,
+            "currentFrame": 0,
+            "zoomLevel": 0.4,
+            "scrollPosition": 0,
         },
         "schemaVersion": 15,
     }
 
-    manifest = {
-        "version": "1.0",
-        "createdAt": now_ms,
-        "editorVersion": "1.0.0",
-        "projectId": project_id,
-        "projectName": safe_title,
-        "media": manifest_media,
-        "checksum": "",
-    }
-    manifest["checksum"] = hashlib.sha256(
-        json.dumps(manifest, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-
-    output_zip = os.path.join(project_dir, f"{safe_title}.freecut.zip")
-    with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("project.json", json.dumps(project_json, indent=2, ensure_ascii=False))
-        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
-        for src_path, zip_rel in media_files_to_zip:
-            zf.write(src_path, zip_rel)
-
-    # Build directly openable `freecut_workspace/`
     workspace_dir = os.path.join(project_dir, "freecut_workspace")
     if os.path.exists(workspace_dir):
         shutil.rmtree(workspace_dir, ignore_errors=True)
@@ -3356,6 +3789,43 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             ensure_ascii=False,
         )
 
+    # Pre-bake all media files, thumbnails, 1fps filmstrips, and WFORM multi-res waveforms in parallel
+    prebake_tasks = [
+        {
+            "mid": entry["originalId"],
+            "mdir": os.path.join(workspace_dir, "media", entry["originalId"]),
+            "src_path": media_id_to_filepath[entry["originalId"]],
+            "entry": entry,
+            "extra": media_id_to_extra.get(entry["originalId"], {}),
+            "now_ms": now_ms,
+        }
+        for entry in manifest_media
+    ]
+    max_workers = min(8, max(2, (os.cpu_count() or 4)))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        list(pool.map(_prebake_workspace_media_entry, prebake_tasks))
+
+    # Generate project cover `projects/<id>/thumbnail.jpg` (640x360) from the first visual anchor asset
+    cover_jpg_path = os.path.join(ws_proj_dir, "thumbnail.jpg")
+    cover_generated = False
+    for entry in manifest_media:
+        emime = entry["mimeType"]
+        mid = entry["originalId"]
+        src_p = media_id_to_filepath[mid]
+        if emime.startswith("image/") and "_cutout" not in entry["fileName"]:
+            if _save_image_thumbnail_jpeg(src_p, cover_jpg_path, 640, 360):
+                cover_generated = True
+                break
+        elif emime.startswith("video/"):
+            f0 = os.path.join(workspace_dir, "media", mid, "cache", "filmstrip", "1.jpg")
+            if not os.path.isfile(f0):
+                f0 = os.path.join(workspace_dir, "media", mid, "cache", "filmstrip", "0.jpg")
+            if os.path.isfile(f0) and _save_image_thumbnail_jpeg(f0, cover_jpg_path, 640, 360):
+                cover_generated = True
+                break
+    if not cover_generated:
+        Image.new("RGB", (640, 360), (11, 14, 20)).save(cover_jpg_path, format="JPEG", quality=82)
+
     ws_items = []
     for it in items:
         wit = dict(it)
@@ -3368,32 +3838,6 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
     with open(os.path.join(ws_proj_dir, "project.json"), "w", encoding="utf-8") as f:
         json.dump(ws_project, f, indent=2, ensure_ascii=False)
 
-    for entry in manifest_media:
-        mid = entry["originalId"]
-        mdir = os.path.join(workspace_dir, "media", mid)
-        os.makedirs(mdir, exist_ok=True)
-        meta_doc = {
-            "id": mid,
-            "storageType": "workspace",
-            "fileName": entry["fileName"],
-            "fileSize": entry["fileSize"],
-            "mimeType": entry["mimeType"],
-            "contentHash": entry["sha256"],
-            "duration": entry["metadata"]["duration"],
-            "width": entry["metadata"]["width"],
-            "height": entry["metadata"]["height"],
-            "fps": entry["metadata"]["fps"],
-            "codec": entry["metadata"]["codec"],
-            "bitrate": 0,
-            "tags": [],
-            "createdAt": now_ms,
-            "updatedAt": now_ms,
-        }
-        with open(os.path.join(mdir, "metadata.json"), "w", encoding="utf-8") as f:
-            json.dump(meta_doc, f, indent=2, ensure_ascii=False)
-        src_p = media_id_to_filepath[mid]
-        shutil.copy2(src_p, os.path.join(mdir, entry["fileName"]))
-
     with open(os.path.join(ws_proj_dir, "media-links.json"), "w", encoding="utf-8") as f:
         json.dump(
             {"version": "1.0", "mediaIds": [{"id": e["originalId"], "addedAt": now_ms} for e in manifest_media]},
@@ -3402,13 +3846,38 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             ensure_ascii=False,
         )
 
-    print(f"[assemble_freecut] OK -> Workspace: {workspace_dir}")
-    print(f"[assemble_freecut] OK -> Bundle   : {output_zip} ({os.path.getsize(output_zip) // 1024} KB)")
+    manifest = _v8_canonical_numbers(
+        {
+            "version": "1.0",
+            "createdAt": now_ms,
+            "editorVersion": "1.0.0",
+            "projectId": project_id,
+            "projectName": safe_title,
+            "media": manifest_media,
+            "checksum": "",
+        }
+    )
+    manifest["checksum"] = hashlib.sha256(
+        json.dumps(manifest, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+    output_zip = os.path.join(project_dir, f"{safe_title}.freecut.zip")
+    with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("project.json", json.dumps(project_json, indent=2, ensure_ascii=False))
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+        if os.path.isfile(cover_jpg_path):
+            zf.write(cover_jpg_path, "cover.jpg")
+        for src_path, zip_rel in media_files_to_zip:
+            zf.write(src_path, zip_rel)
+
+    cache_elapsed = time.time() - t_cache_start
+    print(f"[assemble_freecut v7.1] OK -> Workspace (pre-cached in {cache_elapsed:.2f}s): {workspace_dir}")
+    print(f"[assemble_freecut v7.1] OK -> Bundle   : {output_zip} ({os.path.getsize(output_zip) // 1024} KB)")
     return workspace_dir, output_zip
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Compile FreeCut workspace & .freecut.zip v6 (Multi-Format, Zero Card Vices)")
+    ap = argparse.ArgumentParser(description="Compile FreeCut workspace (v2 pre-cached) & .freecut.zip v7.1")
     ap.add_argument("--project-dir", required=True, help="Path to documentary/video project folder")
     ap.add_argument("--captions", action="store_true", help="Force dynamic word-aligned subtitles on track_captions")
     args = ap.parse_args()

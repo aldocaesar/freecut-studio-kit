@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
 """
-validate_freecut.py (v7.0 — Strict Schema v15 + Zero-Freeze & Anti-Vício Editorial Auditor)
-===========================================================================================
+validate_freecut.py (v7.1 — Strict Schema v15 + Workspace v2 Cold-Open Cache & Anti-Vício Auditor)
+==================================================================================================
 Audits `<project_dir>/freecut_workspace` AND `<project_dir>` editorial artifacts
-against BOTH `walterlow/freecut` schemaVersion 15 AND v7.0 human-editing quality gates:
+against BOTH `walterlow/freecut` (`5ceeeb3`) schemaVersion 15 / Workspace v2 AND v7.1 quality gates:
   1. Multi-format canvas (`1920x1080`, `1080x1920`, `1080x1350`, `1080x1080`) @ 30fps.
-  2. Zero `FREECUT-card` or `shape` box overlays.
-  3. HARD ZERO-FREEZE GATE: `durationInFrames <= (sourceEnd - sourceStart) <= sourceDuration`
-     on 100% of `video` clips (zero frozen tail frames!).
-  4. SUB-SHOT PACING GATE: Single B-roll / Ken Burns clip `<= 6.8s` (`204f` @ 30fps).
-  5. MONUMENTAL WORD GATE: Zero bare 1–3 digit fragments (`'2'`, `'13'`) and optical width fit.
-  6. PRESS HIGHLIGHTER CAP: Max `2` yellow `marker` Lotties per 10 minutes of timeline.
-  7. TYPOGRAPHY ZONE DIVERSITY: Max `32%` of `_callout` texts in a single `(x, y)` coordinate.
-  8. MOTION ANTI-CLONE GATE: Real GeoJSON maps, `<= 25%` motion cutouts, `>= 40%` light/warm/colored
-     motion palettes, and zero consecutive identical `MotionKit.render*` engines.
+  2. Zero-Rewrite Normalization Parity (`didNormalizationChange == false`):
+     - Track `height == 100` (`DEFAULT_TRACK_HEIGHT`) + `kind in ("video", "audio")`
+     - `animationVersion == 2` on 100% of keyframe entries
+     - `0 <= transform.rotation < 360` and zero unintentional same-track overlaps
+     - Integer frame `sourceStart/sourceEnd/sourceDuration` on both `video` and `audio` items
+     - `mimeType == "application/lottie+json"` on all Lottie assets
+  3. Instant Chrome Cold-Open Pre-Caches (Workspace v2):
+     - `projects/<id>/thumbnail.jpg` (`> 0` bytes)
+     - `media/<id>/thumbnail.jpg` (`> 0` bytes) on 100% of image & video assets
+     - `media/<id>/cache/filmstrip/meta.json` (`version == 2`, `isComplete == true`) + `0.jpg..N.jpg` on 100% of videos
+     - `media/<id>/cache/waveform/multi-res.bin` (`WFORM` v1 + 4 levels `[500, 100, 25, 10]`) on 100% of audio & video assets
+  4. HARD ZERO-FREEZE, Sub-Shot Pacing (`<= 6.8s`), Monumental Word Fit, Press Highlighter Cap, & Motion Anti-Clone Gates.
 """
 import argparse
 import collections
 import glob
+import hashlib
 import json
 import math
 import os
 import re
+import struct
 import sys
+import zipfile
 
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -123,6 +129,27 @@ def audit_motion_scenes_v7(project_dir: str, errors: list, stats: dict):
             )
 
 
+def _verify_waveform_bin(bin_path: str) -> str | None:
+    if not os.path.isfile(bin_path) or os.path.getsize(bin_path) < 96:
+        return f"Missing or truncated waveform multi-res.bin: {bin_path}"
+    raw = open(bin_path, "rb").read(96)
+    magic, ver, dur, ch, lvl_cnt = struct.unpack("<5sBfBB36x", raw[:48])
+    if magic != b"WFORM" or ver != 1 or lvl_cnt != 4 or ch not in (1, 2) or dur <= 0:
+        return f"Invalid WFORM header in {bin_path}: magic={magic!r}, ver={ver}, lvl={lvl_cnt}, ch={ch}, dur={dur}"
+    floats_per_sample = 2 if ch >= 2 else 1
+    expected_rates = (500, 100, 25, 10)
+    expected_offset = 96
+    for idx in range(4):
+        srate, scount, doff, _ = struct.unpack("<HIIH", raw[48 + idx * 12 : 60 + idx * 12])
+        if srate != expected_rates[idx] or scount < 1 or doff != expected_offset:
+            return f"Invalid WFORM level[{idx}] in {bin_path}: rate={srate}, count={scount}, offset={doff} (expected {expected_offset})"
+        expected_offset += scount * floats_per_sample * 4
+    actual_size = os.path.getsize(bin_path)
+    if actual_size != expected_offset:
+        return f"WFORM byte size mismatch in {bin_path}: got {actual_size}, expected {expected_offset}"
+    return None
+
+
 def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
     errors = []
     stats = {
@@ -141,7 +168,18 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         "text_motions": 0,
         "motion_modifiers": 0,
         "frozen_videos": 0,
+        "cached_thumbnails": 0,
+        "cached_filmstrips": 0,
+        "cached_waveforms": 0,
     }
+
+    ws_marker_p = os.path.join(ws_dir, ".freecut-workspace.json")
+    if not os.path.isfile(ws_marker_p):
+        errors.append(f"Missing .freecut-workspace.json in {ws_dir}")
+    else:
+        ws_m = json.load(open(ws_marker_p, "r", encoding="utf-8"))
+        if ws_m.get("schemaVersion") != "2.0":
+            errors.append(f"Invalid .freecut-workspace.json schemaVersion: {ws_m.get('schemaVersion')} (expected '2.0')")
 
     idx_path = os.path.join(ws_dir, "index.json")
     if not os.path.isfile(idx_path):
@@ -153,9 +191,18 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         return False, ["index.json lists 0 projects"], stats
 
     pid = projects[0]["id"]
-    proj_path = os.path.join(ws_dir, "projects", pid, "project.json")
+    proj_dir_ws = os.path.join(ws_dir, "projects", pid)
+    proj_path = os.path.join(proj_dir_ws, "project.json")
     if not os.path.isfile(proj_path):
         return False, [f"Missing project.json at {proj_path}"], stats
+
+    cover_p = os.path.join(proj_dir_ws, "thumbnail.jpg")
+    if not os.path.isfile(cover_p) or os.path.getsize(cover_p) == 0:
+        errors.append(f"Missing pre-baked project cover thumbnail.jpg at {cover_p}")
+
+    links_p = os.path.join(proj_dir_ws, "media-links.json")
+    if not os.path.isfile(links_p):
+        errors.append(f"Missing media-links.json at {links_p}")
 
     proj = json.load(open(proj_path, "r", encoding="utf-8"))
     if proj.get("schemaVersion") != 15:
@@ -168,6 +215,16 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         errors.append(f"Invalid canvas resolution: {w}x{h} (expected one of {sorted(VALID_RESOLUTIONS)})")
 
     tl = proj.get("timeline", {})
+    tracks = tl.get("tracks", [])
+    for trk in tracks:
+        if trk.get("kind") not in ("video", "audio"):
+            errors.append(f"Track {trk.get('id')} missing explicit kind='video'|'audio'")
+        if trk.get("height") != 100:
+            errors.append(f"Track {trk.get('id')} height={trk.get('height')} (expected 100 DEFAULT_TRACK_HEIGHT for zero-rewrite load)")
+    for req_tl_k in ("masterBusDb", "currentFrame", "zoomLevel", "scrollPosition"):
+        if req_tl_k not in tl:
+            errors.append(f"timeline.{req_tl_k} missing (triggers normalization rewrite on open)")
+
     items = tl.get("items", [])
     transitions = tl.get("transitions", [])
     keyframes = tl.get("keyframes", [])
@@ -183,6 +240,7 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
     cutout_archetypes = []
     callout_coords = collections.Counter()
 
+    checked_media_ids = set()
     item_ids = set()
     item_dur_map = {}
     item_label_map = {}
@@ -197,6 +255,12 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         tid = it.get("trackId", "")
         lbl = str(it.get("label", ""))
         item_label_map[iid] = lbl
+
+        tr_init = it.get("transform")
+        if isinstance(tr_init, dict) and tr_init.get("rotation") is not None:
+            rot_v = float(tr_init["rotation"])
+            if rot_v < 0.0 or rot_v >= 360.0:
+                errors.append(f"Item {lbl} has unnormalized rotation={rot_v} (expected [0, 360))")
 
         if it.get("motionModifiers"):
             stats["motion_modifiers"] += len(it["motionModifiers"])
@@ -222,7 +286,8 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         if itype in ("video", "image", "audio", "lottie"):
             if not mid:
                 errors.append(f"Item {lbl} ({itype}) missing mediaId")
-            else:
+            elif mid not in checked_media_ids:
+                checked_media_ids.add(mid)
                 mdir = os.path.join(ws_dir, "media", mid)
                 mmeta_p = os.path.join(mdir, "metadata.json")
                 if not os.path.isfile(mmeta_p):
@@ -232,6 +297,33 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
                     f_p = os.path.join(mdir, mmeta["fileName"])
                     if not os.path.isfile(f_p) or os.path.getsize(f_p) == 0:
                         errors.append(f"Missing or 0-byte media file: {f_p}")
+                    mmime = str(mmeta.get("mimeType", ""))
+                    if itype == "lottie" and mmime != "application/lottie+json":
+                        errors.append(f"Lottie media {mmeta.get('fileName')} has mimeType='{mmime}' (expected 'application/lottie+json')")
+                    if mmime.startswith(("image/", "video/")):
+                        th_p = os.path.join(mdir, "thumbnail.jpg")
+                        if not os.path.isfile(th_p) or os.path.getsize(th_p) == 0 or not mmeta.get("thumbnailId"):
+                            errors.append(f"Missing pre-baked thumbnail.jpg / thumbnailId for {mmeta.get('fileName')} ({mid})")
+                        else:
+                            stats["cached_thumbnails"] += 1
+                    if mmime.startswith("video/"):
+                        fs_meta_p = os.path.join(mdir, "cache", "filmstrip", "meta.json")
+                        fs_0_p = os.path.join(mdir, "cache", "filmstrip", "0.jpg")
+                        if not os.path.isfile(fs_meta_p) or not os.path.isfile(fs_0_p) or os.path.getsize(fs_0_p) == 0:
+                            errors.append(f"Missing pre-baked filmstrip cache for video {mmeta.get('fileName')} ({mid})")
+                        else:
+                            fs_m = json.load(open(fs_meta_p, "r", encoding="utf-8"))
+                            if fs_m.get("version") != 2 or not fs_m.get("isComplete"):
+                                errors.append(f"Incomplete/legacy filmstrip meta.json for {mmeta.get('fileName')}: {fs_m}")
+                            else:
+                                stats["cached_filmstrips"] += 1
+                    if mmime.startswith(("audio/", "video/")):
+                        wf_bin_p = os.path.join(mdir, "cache", "waveform", "multi-res.bin")
+                        wf_err = _verify_waveform_bin(wf_bin_p)
+                        if wf_err:
+                            errors.append(f"{mmeta.get('fileName')}: {wf_err}")
+                        else:
+                            stats["cached_waveforms"] += 1
 
         if itype == "video":
             stats["videos"] += 1
@@ -247,7 +339,7 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
                         f"VIDEO_FREEZE_OVERRUN on {lbl}: durationInFrames={dur_f} exceeds video span [{ss}..{se}] (sourceDuration={sd})!"
                     )
             if it.get("volume", 0.0) != 0.0:
-                errors.append(f"Video {lbl} must have volume=0.0 (muted against VO)")
+                errors.append(f"Video {lbl} must have volume=0 (muted against VO)")
 
         elif itype == "image":
             stats["images"] += 1
@@ -264,8 +356,8 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
 
         elif itype == "audio":
             for k in ("sourceStart", "sourceEnd", "sourceDuration"):
-                if not isinstance(it.get(k), (int, float)):
-                    errors.append(f"Audio {lbl} missing numeric '{k}'")
+                if not isinstance(it.get(k), int):
+                    errors.append(f"Audio {lbl} property '{k}' must be int frames, got {type(it.get(k)).__name__}")
             vol = float(it.get("volume", 0.0))
             if tid == "track_sfx":
                 stats["sfx"] += 1
@@ -275,8 +367,8 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
                 if vol > -12.0:
                     errors.append(f"BGM {lbl} volume too loud ({vol} dB > -12.0 dB)")
             elif tid == "track_audio":
-                if abs(vol - 1.0) > 0.05:
-                    errors.append(f"VO {lbl} volume should be 1.0, got {vol}")
+                if not (-3.0 <= vol <= 3.0):
+                    errors.append(f"VO {lbl} volume should be ~0 dB unity gain, got {vol} dB")
 
         elif itype == "text":
             stats["texts"] += 1
@@ -344,9 +436,11 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
         if cutout_archetypes[i][1] == cutout_archetypes[i + 1][1]:
             errors.append(f"Anti-Vício Repetitive Cutout Archetype: '{cutout_archetypes[i][1]}' used twice in a row!")
 
-    # Strict Keyframe Bounds Gate (`0 <= frame < durationInFrames` -> zero "Quadros-chave aparados"!)
+    # Strict Keyframe Bounds & Schema v15 `animationVersion: 2` Gate
     for kf_entry in keyframes:
         kiid = kf_entry.get("itemId")
+        if kf_entry.get("animationVersion") != 2:
+            errors.append(f"Keyframe entry for {kiid} missing animationVersion=2 (got {kf_entry.get('animationVersion')})")
         if kiid not in item_dur_map:
             errors.append(f"Keyframe entry references unknown itemId {kiid}")
             continue
@@ -360,6 +454,26 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
                     errors.append(
                         f"Out-of-clip keyframe on {clbl}.{pname}: frame={fr} outside [0, {cdur - 1}] (causes FreeCut 'Quadros-chave aparados'!)"
                     )
+
+    # Strict Same-Track Zero-Overlap Gate (matches FreeCut `repairOverlappingItems`)
+    tr_pairs = set()
+    for tr in transitions:
+        lc, rc = tr.get("leftClipId"), tr.get("rightClipId")
+        if lc and rc:
+            tr_pairs.add((lc, rc))
+            tr_pairs.add((rc, lc))
+    by_trk = collections.defaultdict(list)
+    for it in items:
+        by_trk[it.get("trackId", "")].append(it)
+    for tid_k, t_items in by_trk.items():
+        t_sorted = sorted(t_items, key=lambda x: int(x.get("from", 0)))
+        for i in range(len(t_sorted) - 1):
+            a, b = t_sorted[i], t_sorted[i + 1]
+            a_end = int(a.get("from", 0)) + int(a.get("durationInFrames", 0))
+            if int(b.get("from", 0)) < a_end and (a.get("id"), b.get("id")) not in tr_pairs:
+                errors.append(
+                    f"Same-track overlap on {tid_k}: {a.get('label')} ends@{a_end} > {b.get('label')} starts@{b.get('from')}"
+                )
 
     # Anti-Vício Gate 1: Strict <= 10% Boxed/Split card ratio cap
     max_allowed_boxed = max(1, anchor_clips // 10)
@@ -384,6 +498,34 @@ def validate_workspace(ws_dir: str) -> tuple[bool, list, dict]:
 
     parent_proj_dir = os.path.dirname(os.path.abspath(ws_dir))
     audit_motion_scenes_v7(parent_proj_dir, errors, stats)
+
+    # Verify V8 `JSON.stringify` SHA-256 checksum parity on `<SafeTitle>.freecut.zip` if present
+    for zp in glob.glob(os.path.join(parent_proj_dir, "*.freecut.zip")):
+        try:
+            with zipfile.ZipFile(zp, "r") as zf:
+                m_obj = json.loads(zf.read("manifest.json").decode("utf-8"))
+                stored_cs = m_obj.get("checksum", "")
+                def _v8_num(o):
+                    if isinstance(o, bool) or o is None or isinstance(o, (int, str)):
+                        return o
+                    if isinstance(o, float):
+                        return int(o) if math.isfinite(o) and o.is_integer() else o
+                    if isinstance(o, list):
+                        return [_v8_num(x) for x in o]
+                    if isinstance(o, dict):
+                        return {k: _v8_num(v) for k, v in o.items()}
+                    return o
+                m_for_hash = _v8_num(dict(m_obj))
+                m_for_hash["checksum"] = ""
+                expected_cs = hashlib.sha256(
+                    json.dumps(m_for_hash, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                ).hexdigest()
+                if stored_cs != expected_cs:
+                    errors.append(f"Bundle {os.path.basename(zp)} manifest checksum mismatch against Chrome V8 JSON.stringify")
+                if "cover.jpg" not in zf.namelist():
+                    errors.append(f"Bundle {os.path.basename(zp)} missing cover.jpg")
+        except Exception as exc:
+            errors.append(f"Bundle {os.path.basename(zp)} unreadable: {exc}")
 
     return len(errors) == 0, errors, stats
 
