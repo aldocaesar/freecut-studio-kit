@@ -4,4 +4,9 @@ __pycache__/
 *.pyc
 node_modules/
 freecut-app/
+projects/
+.openbot/
+.freecut-setup-done.json
+.freecut-creator-memory.json
+*.bak*
 .DS_Store

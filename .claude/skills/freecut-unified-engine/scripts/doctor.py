@@ -183,11 +183,11 @@ def main():
                     env_vars.setdefault(k.strip(), v.strip())
 
     for k, purpose in [
+        ("PIXABAY_API_KEY", "Recommended FREE stock HD video & photo API — instant key at pixabay.com/api/docs/ (fallback: scraped HD photos + YouTube)"),
         ("GROQ_API_KEY", "Optional cloud ultra-fast Whisper (fallback: FREE local faster-whisper)"),
         ("ASSEMBLYAI_API_KEY", "Optional cloud AssemblyAI Universal-2 (fallback: FREE local faster-whisper)"),
-        ("PEXELS_API_KEY", "Optional high-res stock B-roll (fallback: scraped HD photos + YouTube)"),
-        ("PIXABAY_API_KEY", "Optional stock video/image fallback"),
         ("ELEVENLABS_API_KEY", "Optional premium TTS (fallback: FREE edge-tts)"),
+        ("PEXELS_API_KEY", "Optional legacy stock key if you already own one (Pexels paused new API keys; Pixabay covers 100%)"),
     ]:
         present = bool(env_vars.get(k))
         print(f"  [{'SET ' if present else 'FREE'}] {k:20s} : {'Configured' if present else purpose}")
@@ -195,6 +195,19 @@ def main():
     marker_path = os.path.join(root, ".freecut-setup-done.json")
     onboarded = os.path.isfile(marker_path)
     print(f"  [{'DONE' if onboarded else 'NEW '}] {'ONBOARDING_STATE':20s} : {'Completed (.freecut-setup-done.json)' if onboarded else 'First run on this workspace — ask optional keys once then run bootstrap_env.py --mark-onboarded'}")
+
+    mem_path = os.path.join(root, ".freecut-creator-memory.json")
+    if os.path.isfile(mem_path):
+        try:
+            mem_data = json.load(open(mem_path, "r", encoding="utf-8"))
+            n_rules = len(mem_data.get("style_rules") or [])
+            n_projs = len(mem_data.get("recent_projects") or [])
+            mem_note = f"Active ({n_rules} style rule(s), {n_projs} recent project(s) remembered)"
+        except Exception:
+            mem_note = "Present (.freecut-creator-memory.json)"
+        print(f"  [MEM ] {'CREATOR_MEMORY':20s} : {mem_note}")
+    else:
+        print(f"  [INIT] {'CREATOR_MEMORY':20s} : Ready to learn automatically from your edits & feedback (.freecut-creator-memory.json)")
 
     print("\n" + "=" * 72)
     if critical_failures:

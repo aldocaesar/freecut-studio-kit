@@ -34,6 +34,7 @@ LOTTIE_SCRIPT = os.path.join(SKILLS_ROOT, "doc-lottie-overlays", "scripts", "gen
 MOTION_SCRIPT = os.path.join(SKILLS_ROOT, "doc-motion-scenes", "scripts", "render_motion_scene.py")
 ASSEMBLE_SCRIPT = os.path.join(SCRIPT_DIR, "assemble_freecut.py")
 VALIDATE_SCRIPT = os.path.join(SCRIPT_DIR, "validate_freecut.py")
+MEMORY_SCRIPT = os.path.join(SCRIPT_DIR, "creator_memory.py")
 
 
 def _run_step(label: str, cmd: list[str]):
@@ -69,9 +70,12 @@ def main():
     a_cmd = [sys.executable, "-B", ASSEMBLE_SCRIPT, "--project-dir", proj]
     if args.captions:
         a_cmd.append("--captions")
-    _run_step("Step 3/4: Native 10-Track FreeCut Workspace Assembly (v7.0)", a_cmd)
+    _run_step("Step 3/5: Native 10-Track FreeCut Workspace Assembly + v2 Pre-Cache (v7.2)", a_cmd)
 
-    _run_step("Step 4/4: Schema v15 + v7.0 Zero-Freeze & Anti-Vício Validation", [sys.executable, "-B", VALIDATE_SCRIPT, "--project-dir", proj])
+    _run_step("Step 4/5: Schema v15 + Workspace v2 + Zero-Freeze Validation", [sys.executable, "-B", VALIDATE_SCRIPT, "--project-dir", proj])
+
+    if os.path.isfile(MEMORY_SCRIPT):
+        _run_step("Step 5/5: Update Persistent Creator Context Memory", [sys.executable, "-B", MEMORY_SCRIPT, "--record-project", proj, "--summary"])
 
     ws = os.path.join(proj, "freecut_workspace")
     print(f"\n[finish_freecut] READY -> {ws}", flush=True)

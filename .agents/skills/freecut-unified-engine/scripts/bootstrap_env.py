@@ -178,10 +178,11 @@ def install_freecut_ui(target_dir: str):
 def setup_optional_env_keys(env_path: str):
     """Interactive terminal helper (outside OpenBot) to add/update optional keys anytime without reinstalling."""
     keys = [
-        ("PEXELS_API_KEY", "Stock video/image fallback for generic B-roll (optional)"),
+        ("PIXABAY_API_KEY", "Recommended FREE stock HD video & photo API — instant key at pixabay.com/api/docs/ (optional)"),
         ("GROQ_API_KEY", "Cloud ultra-fast Whisper alignment (optional; free local faster-whisper is default)"),
         ("ASSEMBLYAI_API_KEY", "Cloud word-timestamp alignment (optional)"),
         ("ELEVENLABS_API_KEY", "Premium studio voiceover TTS (optional; free edge-tts is default)"),
+        ("PEXELS_API_KEY", "Legacy stock B-roll key if you already own an older one (optional)"),
     ]
     existing = {}
     if os.path.isfile(env_path):

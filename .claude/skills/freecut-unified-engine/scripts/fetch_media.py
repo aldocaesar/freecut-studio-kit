@@ -224,6 +224,8 @@ def rank_candidate(cand: dict, query: str, strict: bool = True, must_match: list
         score += 12.0
     elif "news" in src and has_primary:
         score += 9.0
+    elif not strict and src in ("pixabay_photo", "pexels_photo") and has_primary:
+        score += 12.0
 
     cand["score"] = round(score, 2)
     return score
@@ -546,15 +548,84 @@ def _orientation_for_aspect(aspect_ratio: str) -> str:
     return "landscape"
 
 
+_PIXABAY_FLUFF_WORDS = {
+    "cinematic", "footage", "shot", "shots", "background", "aesthetic", "dramatic",
+    "slow", "motion", "view", "scene", "4k", "hd", "broll", "high", "resolution",
+    "photography", "lighting", "editorial", "modern", "luxury", "wide", "angle",
+    "closeup", "close", "up", "establish", "establishing", "atmospheric", "moody",
+}
+
+
+def _pixabay_queries(query: str) -> list:
+    """
+    Pixabay REST API enforces:
+      1) `q` max length <= 100 chars (returns HTTP 400 if longer!).
+      2) Strict boolean AND matching across creator tags (5-7 word LLM prompts
+         often return 0 hits until distilled to 2-3 core nouns).
+    Returns [trimmed_full_query, compact_2_to_3_keyword_fallback].
+    """
+    clean = re.sub(r"[^\w\s\u00c0-\u017f-]", " ", query or "")
+    clean = " ".join(clean.split())
+    if len(clean) > 95:
+        clean = clean[:95].rsplit(" ", 1)[0].strip()
+    out = [clean] if clean else []
+    core = [
+        w for w in clean.split()
+        if len(w) > 2 and w.lower() not in STOPWORDS and w.lower() not in _PIXABAY_FLUFF_WORDS
+    ]
+    if len(core) >= 2:
+        short3 = " ".join(core[:3])[:95]
+        short2 = " ".join(core[:2])[:95]
+        for cand_q in (short3, short2):
+            if cand_q and cand_q.lower() not in {x.lower() for x in out}:
+                out.append(cand_q)
+    return out or ["abstract"]
+
+
 def search_stock_images(query: str, keys: dict, aspect_ratio: str = "16:9") -> list:
     out = []
     orient = _orientation_for_aspect(aspect_ratio)
+    if keys.get("PIXABAY_API_KEY"):
+        seen_pb = set()
+        for pb_q in _pixabay_queries(query):
+            try:
+                r = requests.get(
+                    "https://pixabay.com/api/",
+                    params={
+                        "key": keys["PIXABAY_API_KEY"],
+                        "q": pb_q,
+                        "image_type": "photo",
+                        "orientation": "vertical" if orient == "portrait" else "horizontal",
+                        "min_width": 1000,
+                        "safesearch": "true",
+                        "per_page": 15,
+                    },
+                    timeout=8,
+                )
+                if r.ok:
+                    for hit in r.json().get("hits", []):
+                        u = hit.get("fullHDURL") or hit.get("largeImageURL") or hit.get("webformatURL", "")
+                        if u and u not in seen_pb:
+                            seen_pb.add(u)
+                            out.append({
+                                "url": u,
+                                "title": hit.get("tags", query),
+                                "caption": hit.get("tags", query),
+                                "page_url": hit.get("pageURL", ""),
+                                "source": "pixabay_photo",
+                                "width": int(hit.get("imageWidth") or 1920),
+                                "height": int(hit.get("imageHeight") or 1080),
+                            })
+                if len(seen_pb) >= 4:
+                    break
+            except Exception:
+                pass
     if keys.get("PEXELS_API_KEY"):
         try:
             r = requests.get(
                 "https://api.pexels.com/v1/search",
                 headers={"Authorization": keys["PEXELS_API_KEY"]},
-                params={"query": query, "per_page": 8, "orientation": orient},
+                params={"query": query, "per_page": 10, "orientation": orient},
                 timeout=8,
             )
             if r.ok:
@@ -570,34 +641,6 @@ def search_stock_images(query: str, keys: dict, aspect_ratio: str = "16:9") -> l
                             "source": "pexels_photo",
                             "width": int(ph.get("width") or 1920),
                             "height": int(ph.get("height") or 1080),
-                        })
-        except Exception:
-            pass
-    if keys.get("PIXABAY_API_KEY"):
-        try:
-            r = requests.get(
-                "https://pixabay.com/api/",
-                params={
-                    "key": keys["PIXABAY_API_KEY"],
-                    "q": query,
-                    "image_type": "photo",
-                    "orientation": "vertical" if orient == "portrait" else "horizontal",
-                    "per_page": 8,
-                },
-                timeout=8,
-            )
-            if r.ok:
-                for hit in r.json().get("hits", []):
-                    u = hit.get("largeImageURL") or hit.get("webformatURL", "")
-                    if u:
-                        out.append({
-                            "url": u,
-                            "title": hit.get("tags", query),
-                            "caption": hit.get("tags", query),
-                            "page_url": hit.get("pageURL", ""),
-                            "source": "pixabay_photo",
-                            "width": int(hit.get("imageWidth") or 1280),
-                            "height": int(hit.get("imageHeight") or 720),
                         })
         except Exception:
             pass
@@ -703,6 +746,60 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
     orient = _orientation_for_aspect(aspect_ratio)
     target_w = ASPECT_DIMS.get(aspect_ratio, (1920, 1080))[0]
     min_pref_dur = max(5.5, min(14.0, dur_s + 0.8))
+    if keys.get("PIXABAY_API_KEY"):
+        seen_pb_v = set()
+        for pb_q in _pixabay_queries(query):
+            try:
+                r = requests.get(
+                    "https://pixabay.com/api/videos/",
+                    params={
+                        "key": keys["PIXABAY_API_KEY"],
+                        "q": pb_q,
+                        "safesearch": "true",
+                        "per_page": 20,
+                    },
+                    timeout=9,
+                )
+                if r.ok:
+                    raw_hits = [h for h in r.json().get("hits", []) if float(h.get("duration") or 0) >= 3.8]
+
+                    def _pb_sort_key(h):
+                        vmap = h.get("videos") or {}
+                        ref = vmap.get("large") or vmap.get("medium") or {}
+                        vw = int(ref.get("width") or 1920)
+                        vh = int(ref.get("height") or 1080)
+                        orient_ok = (vh >= vw) if orient == "portrait" else (vw >= vh)
+                        hdur = float(h.get("duration") or 0)
+                        return (
+                            0 if orient_ok else 1,
+                            0 if hdur >= min_pref_dur else 1,
+                            -min(20.0, hdur),
+                        )
+
+                    for hit in sorted(raw_hits, key=_pb_sort_key):
+                        vmap = hit.get("videos") or {}
+                        tiers = []
+                        for tname in ("large", "medium", "small"):
+                            td = vmap.get(tname) or {}
+                            tu = td.get("url") or ""
+                            tw = int(td.get("width") or 0)
+                            th = int(td.get("height") or 0)
+                            if tu and 720 <= max(tw, th, 720) <= 2560:
+                                tiers.append((abs((tw or target_w) - target_w), tu))
+                        if not tiers:
+                            for tname in ("large", "medium"):
+                                tu = (vmap.get(tname) or {}).get("url") or ""
+                                if tu:
+                                    tiers.append((0, tu))
+                                    break
+                        tiers.sort(key=lambda x: x[0])
+                        if tiers and tiers[0][1] not in seen_pb_v:
+                            seen_pb_v.add(tiers[0][1])
+                            urls.append(("pixabay_video", tiers[0][1]))
+                if len(seen_pb_v) >= 4:
+                    break
+            except Exception:
+                pass
     if keys.get("PEXELS_API_KEY"):
         try:
             r = requests.get(
@@ -728,26 +825,6 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
                     for vf in vfs[:1]:
                         if vf.get("link"):
                             urls.append(("pexels_video", vf["link"]))
-        except Exception:
-            pass
-    if not urls and keys.get("PIXABAY_API_KEY"):
-        try:
-            r = requests.get(
-                "https://pixabay.com/api/videos/",
-                params={"key": keys["PIXABAY_API_KEY"], "q": query, "per_page": 12},
-                timeout=9,
-            )
-            if r.ok:
-                hits = sorted(
-                    r.json().get("hits", []),
-                    key=lambda h: (0 if float(h.get("duration") or 0) >= min_pref_dur else 1, -min(20.0, float(h.get("duration") or 0))),
-                )
-                for hit in hits:
-                    for tier in ("large", "medium"):
-                        u = hit.get("videos", {}).get(tier, {}).get("url", "")
-                        if u:
-                            urls.append(("pixabay_video", u))
-                            break
         except Exception:
             pass
 

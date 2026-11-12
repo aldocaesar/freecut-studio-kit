@@ -1,11 +1,11 @@
 ---
 name: "freecut-unified-engine"
-description: "Universal standalone video production engine for walterlow/freecut (schemaVersion 15 + Workspace v2 pre-cache, v7.1) — Virgin-PC auto-setup, instant Chrome cold-open caches (thumbnails, WFORM waveforms, 1fps filmstrips), zero-freeze multi-shot B-roll, optical hero word fit, 5 press treatments, 6-zone typography, and 1-command finish_freecut.py pipeline."
+description: "Universal standalone video production engine for walterlow/freecut (Schema v15 + Workspace v2 pre-cache, v7.2) — Virgin-PC first-run onboarding, persistent creator context memory, Pixabay HD stock video/photo + zero-key scraping, bare-audio autonomous editing, instant Chrome cold-open caches, and 1-command finish_freecut.py pipeline."
 ---
 
-# FreeCut Unified Engine (`freecut-unified-engine` v7.1)
+# FreeCut Unified Engine (`freecut-unified-engine` v7.2)
 
-Deterministic Python CLI pipeline turning **an audio file, a folder path (audio + optional `.srt`), a camera video, or a text script** into a creative, zero-freeze, instant-opening `walterlow/freecut` project (`freecut_workspace/` + `.freecut.zip`) — **100% standalone, zero mandatory paid APIs, zero `.pyc` pollution (`-B`), and context-safe for 10–20+ minute videos**.
+Deterministic Python CLI pipeline turning **only an audio file (`.mp3`/`.wav`/`.m4a`), a folder path (audio + optional `.srt`), a camera video, or a text script** into a creative, zero-freeze, instant-opening `walterlow/freecut` project (`freecut_workspace/` + `.freecut.zip`) — **100% standalone, zero mandatory paid APIs, first-class Pixabay API support, persistent creator memory across videos, zero `.pyc` pollution (`-B`), and context-safe for 10–20+ minute videos**.
 
 All scripts live in `<SKILL_DIR>/scripts/` (always invoke `python -B`, or `python3 -B` on macOS/Linux).
 
@@ -20,25 +20,33 @@ All scripts live in `<SKILL_DIR>/scripts/` (always invoke `python -B`, or `pytho
 
 ---
 
-## 0. Virgin-PC First-Run Auto-Setup & One-Time Key Check
+## 0. Virgin-PC First-Run Auto-Setup, Pixabay Key Check & Creator Memory
 1. **If `<SKILL_DIR>/scripts/doctor.py` is missing** (fresh install via OpenBot share link), unpack the public kit with native OS tools:
    - **Windows (PowerShell)**:
 ```powershell
-curl.exe -fsSL "https://github.com/aldocaesar/freecut-studio-kit/archive/refs/heads/main.zip" -o ".freecut-kit.zip"; Expand-Archive -Force ".freecut-kit.zip" ".freecut-kit"; Copy-Item -Recurse -Force ".freecut-kit/freecut-studio-kit-main/.agents/skills/*" ".agents/skills/"; New-Item -ItemType Directory -Force ".claude/skills" | Out-Null; Copy-Item -Recurse -Force ".freecut-kit/freecut-studio-kit-main/.claude/skills/*" ".claude/skills/"; foreach ($f in "AGENTS.md","CLAUDE.md","install.ps1","install.sh","doctor.py","requirements.txt",".env.example") { if (-not (Test-Path $f)) { Copy-Item ".freecut-kit/freecut-studio-kit-main/$f" $f } }; Remove-Item -Recurse -Force ".freecut-kit",".freecut-kit.zip"
+curl.exe -fsSL "https://github.com/aldocaesar/freecut-studio-kit/archive/refs/heads/main.zip" -o ".freecut-kit.zip"; Expand-Archive -Force ".freecut-kit.zip" ".freecut-kit"; Copy-Item -Recurse -Force ".freecut-kit/freecut-studio-kit-main/.agents/skills/*" ".agents/skills/"; New-Item -ItemType Directory -Force ".claude/skills" | Out-Null; Copy-Item -Recurse -Force ".freecut-kit/freecut-studio-kit-main/.claude/skills/*" ".claude/skills/"; foreach ($f in "AGENTS.md","CLAUDE.md","install.ps1","install.sh","doctor.py","requirements.txt",".env.example",".gitignore") { if (-not (Test-Path $f)) { Copy-Item ".freecut-kit/freecut-studio-kit-main/$f" $f } }; Remove-Item -Recurse -Force ".freecut-kit",".freecut-kit.zip"
 ```
    - **macOS / Linux**:
 ```bash
-curl -fsSL "https://github.com/aldocaesar/freecut-studio-kit/archive/refs/heads/main.zip" -o .freecut-kit.zip && unzip -qo .freecut-kit.zip -d .freecut-kit && mkdir -p .agents/skills .claude/skills && cp -R .freecut-kit/freecut-studio-kit-main/.agents/skills/* .agents/skills/ && cp -R .freecut-kit/freecut-studio-kit-main/.claude/skills/* .claude/skills/ && for f in AGENTS.md CLAUDE.md install.ps1 install.sh doctor.py requirements.txt .env.example; do test -f "$f" || cp ".freecut-kit/freecut-studio-kit-main/$f" "$f"; done && rm -rf .freecut-kit .freecut-kit.zip
+curl -fsSL "https://github.com/aldocaesar/freecut-studio-kit/archive/refs/heads/main.zip" -o .freecut-kit.zip && unzip -qo .freecut-kit.zip -d .freecut-kit && mkdir -p .agents/skills .claude/skills && cp -R .freecut-kit/freecut-studio-kit-main/.agents/skills/* .agents/skills/ && cp -R .freecut-kit/freecut-studio-kit-main/.claude/skills/* .claude/skills/ && for f in AGENTS.md CLAUDE.md install.ps1 install.sh doctor.py requirements.txt .env.example .gitignore; do test -f "$f" || cp ".freecut-kit/freecut-studio-kit-main/$f" "$f"; done && rm -rf .freecut-kit .freecut-kit.zip
 ```
-2. **If `<WORKSPACE>/.freecut-setup-done.json` is missing**:
+2. **If `<WORKSPACE>/.freecut-setup-done.json` is missing (First-Time Use Detection)**:
    - Run `install.ps1` / `install.sh` (if Python 3 is missing), then `python -B "<SKILL_DIR>/scripts/bootstrap_env.py"`.
-   - Offer **once** via `openbot.ask_user` — **(Recommended) Run 100% Free now** (scraped HD photos/videos + local `faster-whisper`) OR **Add optional keys** (`PEXELS_API_KEY`, `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY` via `openbot.request_api_key` and `--vault-key <NAME> "<vault_path>"`).
-   - Run `python -B "<SKILL_DIR>/scripts/bootstrap_env.py" --mark-onboarded` so future runs start editing immediately with zero questions!
+   - Ask **once** (`openbot.ask_user` in OpenBot, or 1 concise question in CLI) whether the user wants:
+     - **(Recommended) Add FREE `PIXABAY_API_KEY`** (instant free signup at `https://pixabay.com/api/docs/` covering 1080p HD stock videos + photos, since Pexels paused new API keys; optional `GROQ_API_KEY` / `ELEVENLABS_API_KEY` / legacy `PEXELS_API_KEY` also supported via `openbot.request_api_key` + `--vault-key <NAME> "<vault_path>"` or `.env`), OR
+     - **Run 100% Free Zero-Key now** (multi-engine HD web scraping + local `faster-whisper`).
+   - Run `python -B "<SKILL_DIR>/scripts/bootstrap_env.py" --mark-onboarded` so all future runs skip onboarding and start editing immediately!
+3. **Recall & Persist Creator Context Memory (`creator_memory.py`)**:
+   - Before planning any video, run `python -B "<SKILL_DIR>/scripts/creator_memory.py" --summary` (plus `openbot.search_memories` in OpenBot) to load the creator's default aspect ratio, channel niche, durable feedback rules, recurring entities, and last edit's opening/palettes.
+   - Whenever the user gives style feedback or channel preferences (e.g., *"sempre 9:16"*, *"mais paletas claras"*, *"sem legenda"*), persist it immediately via:
+```bash
+python -B "<SKILL_DIR>/scripts/creator_memory.py" --remember "<preference>"
+```
 
 ---
 
-## 1. Word-Level Alignment (`words_compact.txt`)
-- **Audio / Video / Folder with Audio (+ optional `.srt`)**:
+## 1. Bare-Audio Word-Level Alignment (`words_compact.txt`)
+- **Audio Only / Video / Folder with Audio (+ optional `.srt`)**:
 ```bash
 python -B "<SKILL_DIR>/scripts/transcribe_audio.py" --audio "<audio_or_video>" --out-dir "<project_dir>" --lang auto
 ```
@@ -48,30 +56,29 @@ python -B "<SKILL_DIR>/scripts/transcribe_audio.py" --audio "<audio_or_video>" -
 python -B "<SKILL_DIR>/scripts/generate_voiceover.py" --script "<project_dir>/roteiro.txt" --out-dir "<project_dir>" --lang pt-BR
 ```
 - **Camera A-Roll ("Yap")**: `python -B "<SKILL_DIR>/scripts/cut_aroll.py" --project-dir "<project_dir>" --max-pause-ms 320`
-- Next, read **only** `<project_dir>/words_compact.txt` and write `<project_dir>/storyboard.json` (`doc-art-director`).
+- Next, combine `<project_dir>/words_compact.txt` + `creator_memory.py --summary` to write `<project_dir>/storyboard.json` (`doc-art-director`) with zero questionnaires.
 
 ---
 
-## 2. Duration-Aware Parallel Media Hunter + Subagent Vision QA (`fetch_media.py`)
+## 2. Duration-Aware Parallel Media Hunter (`PIXABAY_API_KEY` + Web Scrapers) & Subagent Vision QA
 ```bash
 python -B "<SKILL_DIR>/scripts/fetch_media.py" --project-dir "<project_dir>"
 ```
-- Prioritizes long HD video clips (`duration >= scene_dur + 0.8s`) and automatically downloads secondary B-roll angles (`_b2.mp4` / `_b3.mp4`) whenever a beat exceeds `5.8s` so **no video ever freezes**!
-- **SUBAGENT VISION QA**: Launch **1 subagent** (`invoke_subagent`) to inspect every `media/contact_sheet*.jpg`, swap better candidates via `python -B "<SKILL_DIR>/scripts/fetch_media.py" --project-dir "<project_dir>" --select S02=3 S09=2`, re-hunt weak rows via `--scene S14`, and reply with a short text summary.
+- **Smart Routing**:
+  - `specific: true` (real people, brands, headlines, places) -> **strictly blocks generic stock** (Pixabay/Pexels) and hunts verified real photos/clips via Bing, News RSS, Wikimedia, Yandex, TMDB, Playwright, and `yt-dlp`.
+  - `specific: false` (atmospheric B-roll) -> uses **`PIXABAY_API_KEY`** as primary co-engine for 1080p HD stock videos & photos (with automatic `<=95`-char query cap and 2–3 core-noun tag fallback so verbose prompts never return 0 hits; legacy `PEXELS_API_KEY` or 100% free zero-key scraping also supported), downloading `_b2.mp4` / `_b3.mp4` secondary angles on beats `> 5.8s` so **no video ever freezes**!
+- **SUBAGENT VISION QA**: Launch **1 subagent** (`invoke_subagent`) to inspect every `media/contact_sheet*.jpg`, swap better candidates via `python -B "<SKILL_DIR>/scripts/fetch_media.py" --project-dir "<project_dir>" --select S02=3 S09=2`, re-hunt weak rows via `--scene S14`, and reply with a short `<= 15`-line summary.
 
 ---
 
-## 3. One-Command v7.1 Finalizer (`finish_freecut.py` -> Stop at `freecut_workspace`!)
+## 3. One-Command v7.2 Finalizer (`finish_freecut.py` -> Stop at `freecut_workspace`!)
 After writing diverse `motion/SXX.html` scenes (`doc-motion-scenes`), run **one command**:
 ```bash
 python -B "<SKILL_DIR>/scripts/finish_freecut.py" --project-dir "<project_dir>"
 ```
 1. Generates all `lottie_overlay` JSONs in batch (`generate_lottie.py --project-dir`),
 2. Renders all `motion/*.html` in parallel (`ThreadPoolExecutor(max_workers=3)`) + builds 4-column `motion/motion_contact_sheet.jpg` (`20% / 50% / 78% / 94%` live-tail check),
-3. Assembles `freecut_workspace` + `<Title>.freecut.zip` with:
-   - **Exact Schema v15 Zero-Rewrite Parity** (`DEFAULT_TRACK_HEIGHT=100`, `animationVersion=2`, `[0,360)` rotations, integer frame `source*` on audio & video, `application/lottie+json`),
-   - **Pre-Baked Workspace v2 Cold-Open Caches** (`media/<id>/thumbnail.jpg`, `projects/<id>/thumbnail.jpg`, `cache/waveform/multi-res.bin` `WFORM` v1, and `cache/filmstrip/meta.json` v2 + `1fps` `0.jpg..N.jpg`),
-   - Compound sub-shots (`<= 6.2s` per shot, zero video freeze), optical hero word fit, 5 rotating press treatments, and 6-zone negative-space typography,
-4. Runs strict `validate_freecut.py` v7.1 (`PASS` = 0 schema, cold-open cache, freeze, highlighter-spam, or cloning errors).
-- Have **1 subagent** review `motion/motion_contact_sheet*.jpg` (re-running `finish_freecut.py --force-motion` if any HTML needed adjustment), then **STOP** (do NOT render `.mp4` unless requested) and deliver `<project_dir>/freecut_workspace`!
-- **Instant Open in Google Chrome**: Always instruct the user to select `<project_dir>/freecut_workspace` directly as the **Workspace Folder** in FreeCut (zero-copy, instant ~1–2s load using pre-baked caches), rather than using *Import Project (`.freecut.zip`)* which unzips hundreds of MB in browser RAM and re-copies files sequentially via Chrome File System Access API.
+3. Assembles `freecut_workspace` + `<Title>.freecut.zip` with **Exact Schema v15 Zero-Rewrite Parity** (`didNormalizationChange = false`) and **Pre-Baked Workspace v2 Cold-Open Caches** (`thumbnail.jpg`, `WFORM` v1 `multi-res.bin`, `1fps` `filmstrip`),
+4. Runs strict `validate_freecut.py` (`PASS` = 0 schema, cold-open cache, freeze, highlighter-spam, or cloning errors),
+5. Automatically updates `<WORKSPACE>/.freecut-creator-memory.json` (`creator_memory.py --record-project`) so the next bare-audio drop remembers this edit!
+- Have **1 subagent** review `motion/motion_contact_sheet*.jpg` (re-running `finish_freecut.py --force-motion` if any HTML needed adjustment), then **STOP** (do NOT render `.mp4` unless requested) and instruct the user to open `<project_dir>/freecut_workspace` directly via FreeCut's **Workspace Folder** selector (~1–2s instant load in Chrome).
