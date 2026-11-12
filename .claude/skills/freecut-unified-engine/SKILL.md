@@ -63,8 +63,10 @@ python "<SKILL_DIR>/scripts/cut_aroll.py" --project-dir "<project_dir>" --max-pa
 ```bash
 python "<SKILL_DIR>/scripts/fetch_media.py" --project-dir "<project_dir>"
 ```
-- Hunts real editorial photos/videos (Bing, DuckDuckGo, Google News, Wikimedia Commons, YouTube `yt-dlp`; stock Pexels/Pixabay only when `specific` is `false`), extracts **RGBA cutouts (`media/cutouts/{sid}_cutout.png`)** via `rembg`, and captures **press clippings (`media/prints/{sid}_print.png`)**.
-- **MANDATORY VISION QA GATE**: Always inspect `<project_dir>/media/contact_sheet.jpg` visually before assembling, swapping (`--select S02=3`) or re-hunting (`--scene S02`) any wrong variant.
+- Hunts real editorial photos/videos in parallel (Bing Images, Bing News real article OpenGraph scraper, Wikimedia Commons, Yandex, Playwright Chromium headless browser fallback, and YouTube `yt-dlp`; stock Pexels/Pixabay matched to aspect ratio ONLY when `specific` is `false`), extracts **RGBA cutouts (`media/cutouts/<sid>_cutout.png`)** via `rembg`, and captures **press clippings (`media/prints/<sid>_print.png`)**.
+- **MANDATORY BATCH VISION QA & RE-QUERY LOOP**:
+  1. Visually open **every** generated batch grid (`media/contact_sheet.jpg`, `media/contact_sheet_batch_2.jpg`, etc. — up to 8 scenes per batch covering specific photos, Pexels/ambient photos, 3-frame video strips, and web prints).
+  2. For each row, verify exact entity/country/packaging, zero watermarks, zero awkward face crops, and clean video frames: if Candidate 2, 3, or 4 is better, swap immediately via `--select S02=3`; if none of the candidates or video frames fit, refine `queries` / `must_match` / `exclude_terms` in `storyboard.json` and re-run `fetch_media.py --project-dir "<project_dir>" --scene S02` until 100% of rows pass!
 
 ---
 

@@ -74,6 +74,7 @@ IGNORED_URL_PARTS = (
     "logo", "icon", "avatar", "badge", "tracker", "pixel", "banner_ad", "sprite",
     "spinner", "placeholder", "loading", "thumb_default", ".svg", ".gif",
     "shutterstock", "gettyimages", "alamy", "istockphoto", "dreamstime", "123rf", "depositphotos",
+    "lh3.googleusercontent.com/j6_cofbogxh",
 )
 
 USED_URLS = set()
@@ -329,41 +330,94 @@ def search_yandex_images(query: str, limit: int = 12) -> list:
 
 
 def search_news_images(query: str, limit: int = 8) -> list:
+    """Scrapes real editorial press article OpenGraph photos via Bing News RSS (direct article URLs)."""
     if BeautifulSoup is None:
         return []
     out = []
-    for hl, gl, ceid in (("pt-BR", "BR", "BR:pt-419"), ("en-US", "US", "US:en")):
-        try:
-            rss = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl={hl}&gl={gl}&ceid={ceid}"
-            r = requests.get(rss, headers=WEB_HEADERS, timeout=6)
-            if not r.ok:
-                continue
-            soup = BeautifulSoup(r.text, "xml")
-            items = soup.find_all("item")[:3]
-            for it in items:
-                link = it.link.text if it.link else ""
-                art_title = it.title.text if it.title else ""
-                if not link:
-                    continue
-                pr = requests.get(link, headers=WEB_HEADERS, timeout=6, allow_redirects=True)
+    try:
+        rss = f"https://www.bing.com/news/search?q={urllib.parse.quote(query)}&format=rss"
+        r = requests.get(rss, headers=WEB_HEADERS, timeout=7)
+        if not r.ok:
+            return out
+        soup = BeautifulSoup(r.text, "xml")
+        items = soup.find_all("item")[: max(limit, 6)]
+
+        def _fetch_art(it):
+            link = it.link.text.strip() if it.link and it.link.text else ""
+            art_title = it.title.text.strip() if it.title and it.title.text else ""
+            if not link:
+                return None
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(link).query)
+            real_url = qs.get("url", [link])[0]
+            try:
+                pr = requests.get(real_url, headers=WEB_HEADERS, timeout=5, allow_redirects=True)
                 if not pr.ok:
-                    continue
+                    return None
                 ps = BeautifulSoup(pr.text, "html.parser")
                 og = ps.find("meta", property="og:image") or ps.find("meta", attrs={"name": "twitter:image"})
-                if og and og.get("content", "").startswith("http"):
-                    out.append({
-                        "url": og["content"],
+                img_u = (og.get("content", "").strip() if og else "")
+                if img_u and img_u.startswith("http") and "j6_cofbogxh" not in img_u.lower():
+                    return {
+                        "url": img_u,
                         "title": art_title,
                         "caption": art_title,
                         "page_url": pr.url,
                         "source": "news_article",
                         "width": 1200,
                         "height": 675,
-                    })
-                if len(out) >= limit:
-                    return out
-        except Exception:
-            continue
+                    }
+            except Exception:
+                return None
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            for hit in ex.map(_fetch_art, items):
+                if hit:
+                    out.append(hit)
+                    if len(out) >= limit:
+                        break
+    except Exception:
+        pass
+    return out
+
+
+def search_browser_images_playwright(query: str, limit: int = 10) -> list:
+    """Headless Playwright Chromium fallback when HTTP scrapers get <4 good hits or JS rendering is required."""
+    out = []
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            ctx = browser.new_context(user_agent=BROWSER_UA, viewport={"width": 1366, "height": 900})
+            page = ctx.new_page()
+            url = f"https://www.bing.com/images/search?q={urllib.parse.quote(query)}&qft=+filterui:imagesize-large&form=IRFLTR"
+            page.goto(url, wait_until="domcontentloaded", timeout=14000)
+            page.wait_for_timeout(850)
+            items = page.evaluate("""() => {
+                const res = [];
+                document.querySelectorAll('a.iusc').forEach(a => {
+                    try {
+                        const m = JSON.parse(a.getAttribute('m') || '{}');
+                        if (m.murl && m.murl.startsWith('http')) {
+                            res.push({ url: m.murl, title: m.t || m.desc || '', page_url: m.purl || '' });
+                        }
+                    } catch {}
+                });
+                return res;
+            }""")
+            browser.close()
+            for it in (items or [])[:limit]:
+                out.append({
+                    "url": it["url"],
+                    "title": it.get("title", ""),
+                    "caption": it.get("title", ""),
+                    "page_url": it.get("page_url", ""),
+                    "source": "playwright_browser",
+                    "width": 1280,
+                    "height": 720,
+                })
+    except Exception:
+        pass
     return out
 
 
@@ -479,14 +533,23 @@ def search_openverse_images(query: str, limit: int = 8) -> list:
     return out
 
 
-def search_stock_images(query: str, keys: dict) -> list:
+def _orientation_for_aspect(aspect_ratio: str) -> str:
+    if aspect_ratio in ("9:16", "4:5"):
+        return "portrait"
+    if aspect_ratio == "1:1":
+        return "square"
+    return "landscape"
+
+
+def search_stock_images(query: str, keys: dict, aspect_ratio: str = "16:9") -> list:
     out = []
+    orient = _orientation_for_aspect(aspect_ratio)
     if keys.get("PEXELS_API_KEY"):
         try:
             r = requests.get(
                 "https://api.pexels.com/v1/search",
                 headers={"Authorization": keys["PEXELS_API_KEY"]},
-                params={"query": query, "per_page": 8, "orientation": "landscape"},
+                params={"query": query, "per_page": 8, "orientation": orient},
                 timeout=8,
             )
             if r.ok:
@@ -509,7 +572,13 @@ def search_stock_images(query: str, keys: dict) -> list:
         try:
             r = requests.get(
                 "https://pixabay.com/api/",
-                params={"key": keys["PIXABAY_API_KEY"], "q": query, "image_type": "photo", "per_page": 8},
+                params={
+                    "key": keys["PIXABAY_API_KEY"],
+                    "q": query,
+                    "image_type": "photo",
+                    "orientation": "vertical" if orient == "portrait" else "horizontal",
+                    "per_page": 8,
+                },
                 timeout=8,
             )
             if r.ok:
@@ -532,17 +601,18 @@ def search_stock_images(query: str, keys: dict) -> list:
 
 # ── Video Fetchers (Stock HD + YouTube Specific Excerpt via yt-dlp) ───────
 
-def normalize_video_for_freecut(raw_mp4: str, out_mp4: str, target_dur_s: float) -> bool:
-    """Normalizes any video to silent 1920x1080 @ 30fps, -g 30 keyframe-aligned H.264 for buttery FreeCut scrubbing."""
+def normalize_video_for_freecut(raw_mp4: str, out_mp4: str, target_dur_s: float, aspect_ratio: str = "16:9") -> bool:
+    """Normalizes any video to silent target aspect @ 30fps, -g 30 keyframe-aligned H.264 for buttery FreeCut scrubbing."""
     try:
         os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
+        tw, th = ASPECT_DIMS.get(aspect_ratio, (1920, 1080))
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-i", raw_mp4,
             "-t", f"{max(3.5, target_dur_s + 1.2):.2f}",
             "-map_metadata", "-1",
             "-an",
-            "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,format=yuv420p",
+            "-vf", f"scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},fps=30,format=yuv420p",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
             "-r", "30", "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
             "-movflags", "+faststart",
@@ -554,7 +624,28 @@ def normalize_video_for_freecut(raw_mp4: str, out_mp4: str, target_dur_s: float)
         return False
 
 
-def fetch_specific_youtube_clip(query: str, raw_mp4: str, out_mp4: str, dur_s: float) -> str:
+def extract_video_preview_frames(video_path: str, sid: str, project_dir: str, dur_s: float) -> list:
+    """Extracts 3 keyframe thumbnails (15%, 50%, 85%) from a downloaded video so Vision QA checks video clips too."""
+    cand_dir = os.path.join(project_dir, "media", "candidates")
+    os.makedirs(cand_dir, exist_ok=True)
+    thumbs = []
+    for idx, frac in enumerate((0.15, 0.50, 0.85), 1):
+        ts = max(0.2, round(dur_s * frac, 2))
+        out_jpg = os.path.join(cand_dir, f"{sid}_vid_f{idx}.jpg")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{ts:.2f}", "-i", video_path, "-frames:v", "1", "-q:v", "3", out_jpg],
+                check=True,
+                timeout=12,
+            )
+            if os.path.isfile(out_jpg) and os.path.getsize(out_jpg) > 1000:
+                thumbs.append({"cand_idx": idx, "path": out_jpg, "label": f"FRAME {int(frac*100)}%"})
+        except Exception:
+            pass
+    return thumbs
+
+
+def fetch_specific_youtube_clip(query: str, raw_mp4: str, out_mp4: str, dur_s: float, aspect_ratio: str = "16:9") -> str:
     """Downloads ONLY a clean ~10s section from YouTube via yt-dlp for specific people/events/products."""
     if shutil.which("yt-dlp") is None:
         return ""
@@ -575,32 +666,34 @@ def fetch_specific_youtube_clip(query: str, raw_mp4: str, out_mp4: str, dur_s: f
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
         if res.returncode == 0 and os.path.isfile(raw_mp4) and os.path.getsize(raw_mp4) > 15000:
-            if normalize_video_for_freecut(raw_mp4, out_mp4, dur_s):
+            if normalize_video_for_freecut(raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio):
                 return f"ytsearch1:{query}"
     except Exception:
         pass
     return ""
 
 
-def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str, dur_s: float) -> str:
+def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str, dur_s: float, aspect_ratio: str = "16:9") -> str:
     urls = []
+    orient = _orientation_for_aspect(aspect_ratio)
+    target_w = ASPECT_DIMS.get(aspect_ratio, (1920, 1080))[0]
     if keys.get("PEXELS_API_KEY"):
         try:
             r = requests.get(
                 "https://api.pexels.com/videos/search",
                 headers={"Authorization": keys["PEXELS_API_KEY"]},
-                params={"query": query, "per_page": 8, "orientation": "landscape"},
+                params={"query": query, "per_page": 8, "orientation": orient},
                 timeout=9,
             )
             if r.ok:
                 for vid in r.json().get("videos", []):
                     vfs = sorted(
-                        [vf for vf in vid.get("video_files", []) if 1280 <= vf.get("width", 0) <= 2560],
-                        key=lambda x: abs(x.get("width", 1920) - 1920),
+                        [vf for vf in vid.get("video_files", []) if 720 <= max(vf.get("width", 0), vf.get("height", 0)) <= 2560],
+                        key=lambda x: abs(x.get("width", target_w) - target_w),
                     ) or vid.get("video_files", [])
                     for vf in vfs[:1]:
                         if vf.get("link"):
-                            urls.append(vf["link"])
+                            urls.append(("pexels_video", vf["link"]))
         except Exception:
             pass
     if not urls and keys.get("PIXABAY_API_KEY"):
@@ -615,12 +708,12 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
                     for tier in ("large", "medium"):
                         u = hit.get("videos", {}).get(tier, {}).get("url", "")
                         if u:
-                            urls.append(u)
+                            urls.append(("pixabay_video", u))
                             break
         except Exception:
             pass
 
-    for u in urls:
+    for src_tag, u in urls:
         if not register_unique_media(u):
             continue
         try:
@@ -632,10 +725,14 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
                     for chunk in resp.iter_content(65536):
                         if chunk:
                             f.write(chunk)
-            if normalize_video_for_freecut(raw_mp4, out_mp4, dur_s):
-                return u
+            if normalize_video_for_freecut(raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio):
+                return f"{src_tag}:{u}"
         except Exception:
             continue
+
+    # Zero-key free B-roll fallback when neither Pexels nor Pixabay key is configured
+    if not keys.get("PEXELS_API_KEY") and not keys.get("PIXABAY_API_KEY"):
+        return fetch_specific_youtube_clip(f"{query} 4k b-roll footage no talking", raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
     return ""
 
 
@@ -852,6 +949,7 @@ def gather_image_candidates(
     must_match: list = None,
     exclude_terms: list = None,
     seed_urls: list = None,
+    aspect_ratio: str = "16:9",
 ) -> list:
     pool = []
     seen = set()
@@ -871,28 +969,36 @@ def gather_image_candidates(
             })
     for q in queries:
         if mode == "pop":
-            batches = [
-                search_tmdb_images(q, keys.get("TMDB_API_KEY", ""), universe=universe),
-                search_bing_images(q, limit=12),
-                search_duckduckgo_images(q, limit=10),
-                search_yandex_images(q, limit=10),
-                search_wikimedia_images(q, limit=8),
+            tasks = [
+                lambda q=q: search_tmdb_images(q, keys.get("TMDB_API_KEY", ""), universe=universe),
+                lambda q=q: search_bing_images(q, limit=12),
+                lambda q=q: search_news_images(q, limit=6),
+                lambda q=q: search_yandex_images(q, limit=10),
+                lambda q=q: search_wikimedia_images(q, limit=8),
             ]
         elif specific:
-            batches = [
-                search_bing_images(q, limit=14),
-                search_duckduckgo_images(q, limit=12),
-                search_news_images(q, limit=6),
-                search_yandex_images(q, limit=10),
-                search_wikimedia_images(q, limit=10),
-                search_tmdb_images(q, keys.get("TMDB_API_KEY", ""), universe=universe),
+            tasks = [
+                lambda q=q: search_bing_images(q, limit=14),
+                lambda q=q: search_news_images(q, limit=6),
+                lambda q=q: search_wikimedia_images(q, limit=10),
+                lambda q=q: search_yandex_images(q, limit=10),
+                lambda q=q: search_tmdb_images(q, keys.get("TMDB_API_KEY", ""), universe=universe),
             ]
         else:
-            batches = [
-                search_stock_images(q, keys),
-                search_wikimedia_images(q, limit=8),
-                search_openverse_images(q, limit=8),
+            tasks = [
+                lambda q=q: search_stock_images(q, keys, aspect_ratio=aspect_ratio),
+                lambda q=q: search_wikimedia_images(q, limit=8),
+                lambda q=q: search_openverse_images(q, limit=8),
             ]
+
+        batches = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as ex:
+            for fut in concurrent.futures.as_completed([ex.submit(fn) for fn in tasks]):
+                try:
+                    batches.append(fut.result() or [])
+                except Exception:
+                    pass
+
         for batch in batches:
             for c in batch:
                 u = c.get("url", "")
@@ -902,6 +1008,18 @@ def gather_image_candidates(
                     if sc > -20:
                         c["matched_query"] = q
                         pool.append(c)
+
+        # Headless Playwright browser fallback if HTTP scrapers returned fewer than 4 strong candidates
+        if len([c for c in pool if c.get("score", 0) >= 52]) < 4:
+            for c in search_browser_images_playwright(q, limit=10):
+                u = c.get("url", "")
+                if u and u not in seen:
+                    seen.add(u)
+                    sc = rank_candidate(c, q, strict=specific, must_match=must_match, exclude_terms=exclude_terms)
+                    if sc > -20:
+                        c["matched_query"] = q
+                        pool.append(c)
+
         if len([c for c in pool if c.get("score", 0) >= 75]) >= 8:
             break
 
@@ -928,7 +1046,13 @@ def download_and_validate_candidates(
     for cand in pool[:24]:
         u = cand["url"]
         try:
-            r = requests.get(u, headers=WEB_HEADERS, timeout=11)
+            hdrs = dict(WEB_HEADERS)
+            if cand.get("page_url"):
+                hdrs["Referer"] = cand["page_url"]
+            r = requests.get(u, headers=hdrs, timeout=11)
+            if r.status_code == 403 and "Referer" in hdrs:
+                hdrs.pop("Referer", None)
+                r = requests.get(u, headers=hdrs, timeout=9)
             if not r.ok or len(r.content) < 6500:
                 continue
             im = Image.open(io.BytesIO(r.content))
@@ -1012,62 +1136,138 @@ def _load_cross_platform_fonts():
     return d, d, d
 
 
-def render_contact_sheet(results: list, out_jpg: str):
-    """Generates a crisp numbered visual contact sheet of all specific-entity scenes for 1-shot Vision QA."""
-    spec_rows = [r for r in results if r.get("specific") and r.get("candidates")]
-    if not spec_rows:
+def render_contact_sheet(results: list, out_jpg: str, batch_size: int = 8):
+    """
+    Generates crisp, high-resolution visual QA contact sheet batches covering ALL visual scenes:
+      - Specific Images (`#1 SELECTED` .. `#4`)
+      - Ambient / Pexels Images (`#1 SELECTED` .. `#3`)
+      - Videos (`3` extracted frames at 15%, 50%, 85% of clip)
+      - Web Press Prints (`1` captured screenshot)
+      - Missing scenes (bright red alert row so Vision QA re-queries immediately)
+    Paginates into batches of `batch_size` rows (`contact_sheet.jpg`, `contact_sheet_batch_2.jpg`, ...)
+    so thumbnails stay sharp and readable for Vision models even on 20-30 scene edits.
+    """
+    vis_rows = [
+        r for r in results
+        if r.get("actual_type") not in ("text_only", "motion_only", "none")
+    ]
+    if not vis_rows:
         return ""
 
     row_h = 250
     col_w = 340
-    left_w = 340
+    left_w = 360
     W = left_w + col_w * 4 + 30
-    H = 70 + len(spec_rows) * row_h + 20
-
-    sheet = Image.new("RGB", (W, H), (15, 17, 22))
-    draw = ImageDraw.Draw(sheet)
     f_hdr, f_sub, f_tag = _load_cross_platform_fonts()
+    os.makedirs(os.path.dirname(out_jpg), exist_ok=True)
 
-    draw.text((24, 20), "VISUAL ASSET CONTACT SHEET — SPECIFIC ENTITIES (VISION QA)", fill=(242, 244, 248), font=f_hdr)
-
-    for r_idx, row in enumerate(spec_rows):
-        y0 = 70 + r_idx * row_h
-        draw.line([(20, y0 - 8), (W - 20, y0 - 8)], fill=(42, 46, 56), width=1)
-        sid = row["scene_id"]
-        selected = row.get("selected_cand", 1)
-        q_label = (row.get("queries") or [""])[0][:34]
-        narr = (row.get("narration") or "")[:95]
-
-        draw.text((24, y0 + 8), f"{sid} [SPECIFIC]", fill=(56, 189, 248), font=f_hdr)
-        draw.text((24, y0 + 42), f"Query: {q_label}", fill=(210, 216, 226), font=f_sub)
-        for li in range(0, len(narr), 34):
-            draw.text((24, y0 + 72 + (li // 34) * 20), narr[li:li + 34], fill=(148, 156, 172), font=f_sub)
-
-        for c in row["candidates"][:4]:
-            ci = c["cand_idx"]
-            x0 = left_w + (ci - 1) * col_w
-            thumb_box = (col_w - 20, row_h - 54)
+    # Remove stale extra batch files from older runs
+    base_dir = os.path.dirname(out_jpg)
+    for old_f in os.listdir(base_dir):
+        if old_f.startswith("contact_sheet_batch_") and old_f.endswith(".jpg"):
             try:
-                with Image.open(c["path"]) as cim:
-                    th = ImageOps.contain(cim.convert("RGB"), thumb_box, Image.Resampling.LANCZOS)
-                bg_cell = Image.new("RGB", thumb_box, (26, 29, 36))
-                bg_cell.paste(th, ((thumb_box[0] - th.width) // 2, (thumb_box[1] - th.height) // 2))
-                sheet.paste(bg_cell, (x0, y0 + 4))
+                os.remove(os.path.join(base_dir, old_f))
             except Exception:
                 pass
 
-            is_sel = (ci == selected)
-            b_col = (34, 197, 94) if is_sel else (75, 85, 99)
-            draw.rectangle([x0, y0 + 4, x0 + thumb_box[0], y0 + 4 + thumb_box[1]], outline=b_col, width=4 if is_sel else 1)
-            badge_txt = f"#{ci} SELECTED" if is_sel else f"#{ci}"
-            draw.rectangle([x0 + 6, y0 + 10, x0 + (128 if is_sel else 42), y0 + 34], fill=b_col)
-            draw.text((x0 + 12, y0 + 13), badge_txt, fill=(10, 12, 15) if is_sel else (245, 245, 245), font=f_tag)
-            meta_line = f"{c['width']}x{c['height']} | {c['source'][:18]}"
-            draw.text((x0 + 2, y0 + row_h - 42), meta_line, fill=(185, 192, 205), font=f_tag)
+    total_batches = max(1, (len(vis_rows) + batch_size - 1) // batch_size)
+    written_sheets = []
 
-    os.makedirs(os.path.dirname(out_jpg), exist_ok=True)
-    sheet.save(out_jpg, "JPEG", quality=90)
-    return out_jpg
+    for b_idx in range(total_batches):
+        chunk = vis_rows[b_idx * batch_size : (b_idx + 1) * batch_size]
+        H = 74 + len(chunk) * row_h + 20
+        sheet = Image.new("RGB", (W, H), (15, 17, 22))
+        draw = ImageDraw.Draw(sheet)
+
+        hdr = f"VISUAL MEDIA QA GRID — BATCH {b_idx + 1}/{total_batches} (VERIFY EVERY ROW: --select SXX=N OR REWRITE QUERY + --scene SXX)"
+        draw.text((24, 20), hdr, fill=(242, 244, 248), font=f_hdr)
+
+        for r_idx, row in enumerate(chunk):
+            y0 = 74 + r_idx * row_h
+            draw.line([(20, y0 - 8), (W - 20, y0 - 8)], fill=(42, 46, 56), width=1)
+            sid = row["scene_id"]
+            atype = row.get("actual_type", "image")
+            spec_tag = "SPECIFIC" if row.get("specific") else "AMBIENT/STOCK"
+            selected = row.get("selected_cand", 1)
+            q_label = (row.get("queries") or [""])[0][:36]
+            narr = (row.get("narration") or "")[:102]
+
+            badge_color = (56, 189, 248) if row.get("specific") else (167, 139, 250)
+            if not row.get("ok"):
+                badge_color = (248, 113, 113)
+            draw.text((24, y0 + 8), f"{sid} [{atype.upper()} • {spec_tag}]", fill=badge_color, font=f_hdr)
+            draw.text((24, y0 + 42), f"Query: {q_label}", fill=(210, 216, 226), font=f_sub)
+            for li in range(0, len(narr), 36):
+                draw.text((24, y0 + 72 + (li // 36) * 20), narr[li:li + 36], fill=(148, 156, 172), font=f_sub)
+
+            thumb_box = (col_w - 20, row_h - 54)
+            if not row.get("ok"):
+                x0 = left_w
+                draw.rectangle([x0, y0 + 4, x0 + col_w * 2, y0 + 4 + thumb_box[1]], fill=(65, 18, 22), outline=(239, 68, 68), width=3)
+                draw.text((x0 + 20, y0 + 70), "MISSING MEDIA — REWRITE QUERY & RE-RUN --scene " + sid, fill=(254, 202, 202), font=f_hdr)
+                continue
+
+            if atype == "video":
+                vframes = row.get("video_frames") or []
+                for vf in vframes[:3]:
+                    ci = vf["cand_idx"]
+                    x0 = left_w + (ci - 1) * col_w
+                    try:
+                        with Image.open(vf["path"]) as cim:
+                            th = ImageOps.contain(cim.convert("RGB"), thumb_box, Image.Resampling.LANCZOS)
+                        bg_cell = Image.new("RGB", thumb_box, (26, 29, 36))
+                        bg_cell.paste(th, ((thumb_box[0] - th.width) // 2, (thumb_box[1] - th.height) // 2))
+                        sheet.paste(bg_cell, (x0, y0 + 4))
+                    except Exception:
+                        pass
+                    draw.rectangle([x0, y0 + 4, x0 + thumb_box[0], y0 + 4 + thumb_box[1]], outline=(34, 197, 94), width=3)
+                    lbl = vf.get("label", f"FRAME {ci}")
+                    draw.rectangle([x0 + 6, y0 + 10, x0 + 118, y0 + 34], fill=(34, 197, 94))
+                    draw.text((x0 + 12, y0 + 13), lbl, fill=(10, 12, 15), font=f_tag)
+                    draw.text((x0 + 2, y0 + row_h - 42), f"VIDEO | {str(row.get('url',''))[:28]}", fill=(185, 192, 205), font=f_tag)
+                continue
+
+            if atype == "web_print" and row.get("path"):
+                x0 = left_w
+                try:
+                    with Image.open(row["path"]) as cim:
+                        th = ImageOps.contain(cim.convert("RGB"), thumb_box, Image.Resampling.LANCZOS)
+                    bg_cell = Image.new("RGB", thumb_box, (26, 29, 36))
+                    bg_cell.paste(th, ((thumb_box[0] - th.width) // 2, (thumb_box[1] - th.height) // 2))
+                    sheet.paste(bg_cell, (x0, y0 + 4))
+                except Exception:
+                    pass
+                draw.rectangle([x0, y0 + 4, x0 + thumb_box[0], y0 + 4 + thumb_box[1]], outline=(34, 197, 94), width=4)
+                draw.rectangle([x0 + 6, y0 + 10, x0 + 136, y0 + 34], fill=(34, 197, 94))
+                draw.text((x0 + 12, y0 + 13), "WEB PRINT", fill=(10, 12, 15), font=f_tag)
+                continue
+
+            for c in (row.get("candidates") or [])[:4]:
+                ci = c["cand_idx"]
+                x0 = left_w + (ci - 1) * col_w
+                try:
+                    with Image.open(c["path"]) as cim:
+                        th = ImageOps.contain(cim.convert("RGB"), thumb_box, Image.Resampling.LANCZOS)
+                    bg_cell = Image.new("RGB", thumb_box, (26, 29, 36))
+                    bg_cell.paste(th, ((thumb_box[0] - th.width) // 2, (thumb_box[1] - th.height) // 2))
+                    sheet.paste(bg_cell, (x0, y0 + 4))
+                except Exception:
+                    pass
+
+                is_sel = (ci == selected)
+                b_col = (34, 197, 94) if is_sel else (75, 85, 99)
+                draw.rectangle([x0, y0 + 4, x0 + thumb_box[0], y0 + 4 + thumb_box[1]], outline=b_col, width=4 if is_sel else 1)
+                badge_txt = f"#{ci} SELECTED" if is_sel else f"#{ci}"
+                draw.rectangle([x0 + 6, y0 + 10, x0 + (128 if is_sel else 42), y0 + 34], fill=b_col)
+                draw.text((x0 + 12, y0 + 13), badge_txt, fill=(10, 12, 15) if is_sel else (245, 245, 245), font=f_tag)
+                meta_line = f"{c['width']}x{c['height']} | {c['source'][:18]}"
+                draw.text((x0 + 2, y0 + row_h - 42), meta_line, fill=(185, 192, 205), font=f_tag)
+
+        target_p = out_jpg if b_idx == 0 else os.path.join(base_dir, f"contact_sheet_batch_{b_idx + 1}.jpg")
+        sheet.save(target_p, "JPEG", quality=90)
+        written_sheets.append(target_p)
+
+    return written_sheets
 
 
 def _scene_wants_cutout(scene: dict, layout_style: str) -> bool:
@@ -1145,11 +1345,12 @@ def process_scene(scene: dict, project_dir: str, keys: dict, aspect_ratio: str =
         raw_mp4 = os.path.join(raw_dir, f"{sid}_raw.mp4")
         for q in queries:
             src_hit = (
-                fetch_specific_youtube_clip(q, raw_mp4, out_mp4, dur_s)
+                fetch_specific_youtube_clip(q, raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
                 if specific
-                else fetch_ambient_stock_video(q, keys, raw_mp4, out_mp4, dur_s)
+                else fetch_ambient_stock_video(q, keys, raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
             )
             if src_hit:
+                vframes = extract_video_preview_frames(out_mp4, sid, project_dir, dur_s)
                 return {
                     "scene_id": sid,
                     "ok": True,
@@ -1159,9 +1360,11 @@ def process_scene(scene: dict, project_dir: str, keys: dict, aspect_ratio: str =
                     "narration": scene.get("narration", ""),
                     "path": out_mp4,
                     "url": src_hit,
+                    "source": src_hit.split(":", 1)[0] if ":" in src_hit else "video",
+                    "video_frames": vframes,
                 }
 
-    # 2. Multi-source image discovery + Top-4 validation
+    # 2. Multi-source image discovery + Top-4/Top-3 candidate pool validation
     pool = gather_image_candidates(
         queries,
         specific=specific,
@@ -1171,13 +1374,14 @@ def process_scene(scene: dict, project_dir: str, keys: dict, aspect_ratio: str =
         must_match=must_match,
         exclude_terms=exclude_terms,
         seed_urls=seed_urls,
+        aspect_ratio=aspect_ratio,
     )
     kept = download_and_validate_candidates(
         sid,
         pool,
         project_dir,
         query_ref=queries[0],
-        max_keep=4 if specific else 1,
+        max_keep=4 if specific else 3,
         penalize_white_bg=(layout_style == "full_bleed_ken_burns" and not wants_cutout),
         must_match=must_match,
         exclude_terms=exclude_terms,
@@ -1260,8 +1464,8 @@ def apply_manual_selections(project_dir: str, selections: list):
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     sheet_path = os.path.join(project_dir, "media", "contact_sheet.jpg")
-    render_contact_sheet(report, sheet_path)
-    print(f"[select] Updated contact sheet: {sheet_path}")
+    sheets = render_contact_sheet(report, sheet_path)
+    print(f"[select] Updated contact sheet batch(es): {', '.join(sheets) if isinstance(sheets, list) else sheets}")
 
 
 def main():
@@ -1322,9 +1526,10 @@ def main():
         json.dump(ordered, f, ensure_ascii=False, indent=2)
 
     sheet_path = os.path.join(args.project_dir, "media", "contact_sheet.jpg")
-    built_sheet = render_contact_sheet(ordered, sheet_path)
-    if built_sheet:
-        print(f"[fetch_media v6] Contact sheet ready for Vision QA: {built_sheet}")
+    built_sheets = render_contact_sheet(ordered, sheet_path)
+    if built_sheets:
+        for sp in (built_sheets if isinstance(built_sheets, list) else [built_sheets]):
+            print(f"[fetch_media v6] Contact sheet batch ready for Vision QA: {sp}")
 
 
 if __name__ == "__main__":
