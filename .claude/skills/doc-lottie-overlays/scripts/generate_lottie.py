@@ -543,11 +543,45 @@ def make_pointer_arrow(w=360, h=220, dur_frames=90, accent="#EA580C"):
     }
 
 
+def _build_preset_json(kind: str, dur_frames: int, accent: str, bg: str) -> dict:
+    if kind in ("minimal_lower_third", "lower_third_bar"):
+        return make_minimal_lower_third(dur_frames=dur_frames, accent=accent, dark=bg)
+    if kind in ("focus_corner_brackets", "corner_brackets"):
+        return make_focus_corner_brackets(dur_frames=dur_frames, accent=accent)
+    if kind == "handdrawn_underline":
+        return make_handdrawn_underline(dur_frames=dur_frames, accent=accent)
+    if kind == "handdrawn_circle":
+        return make_handdrawn_circle(dur_frames=dur_frames, accent=accent)
+    if kind == "marker_highlight":
+        return make_marker_highlight(dur_frames=dur_frames, accent=accent)
+    if kind == "pointer_arrow":
+        return make_pointer_arrow(dur_frames=dur_frames, accent=accent)
+    return make_pulse_beacon(dur_frames=dur_frames, accent=accent)
+
+
+def _infer_kind_from_path(file_path: str, layout: str = "") -> str:
+    low = os.path.basename(file_path).lower()
+    if "marker" in low or "highlight" in low or layout == "press_evidence_highlight":
+        return "marker_highlight"
+    if "arrow" in low or "pointer" in low:
+        return "pointer_arrow"
+    if "bracket" in low or "focus" in low:
+        return "focus_corner_brackets"
+    if "under" in low:
+        return "handdrawn_underline"
+    if "circle" in low or "ring" in low:
+        return "handdrawn_circle"
+    if "pulse" in low or "beacon" in low:
+        return "pulse_beacon"
+    return "minimal_lower_third"
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--project-dir", help="Batch-generate all lottie_overlay files referenced in storyboard.json")
     ap.add_argument(
         "--kind",
-        required=True,
+        required=False,
         choices=[
             "minimal_lower_third",
             "lower_third_bar",
@@ -560,27 +594,47 @@ def main():
             "pointer_arrow",
         ],
     )
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", required=False)
     ap.add_argument("--duration", type=float, default=3.5)
     ap.add_argument("--accent", default="#C84B31")
     ap.add_argument("--bg", default="#0D121A")
     args = ap.parse_args()
 
+    if args.project_dir:
+        sb_path = os.path.join(args.project_dir, "storyboard.json")
+        if not os.path.isfile(sb_path):
+            raise FileNotFoundError(f"storyboard.json not found in {args.project_dir}")
+        sb = json.load(open(sb_path, "r", encoding="utf-8"))
+        dna = sb.get("style_dna") or {}
+        def_accent = dna.get("accent") or args.accent
+        def_bg = dna.get("studio_bg") or args.bg
+        fps = int(sb.get("fps") or 30)
+        built = 0
+        for sc in sb.get("scenes", []):
+            ov = sc.get("lottie_overlay")
+            if not isinstance(ov, dict) or not ov.get("file"):
+                continue
+            rel_f = ov["file"]
+            out_p = rel_f if os.path.isabs(rel_f) else os.path.join(args.project_dir, rel_f)
+            if os.path.isfile(out_p) and os.path.getsize(out_p) > 50 and not ov.get("overwrite"):
+                continue
+            dur_s = float(ov.get("duration") or max(2.2, (sc.get("end_ms", 3500) - sc.get("start_ms", 0)) / 1000.0 - 0.3))
+            frames = max(24, int(round(dur_s * fps)))
+            kind = ov.get("kind") or _infer_kind_from_path(out_p, str(sc.get("layout", "")))
+            accent = ov.get("accent") or ("#FACC15" if kind == "marker_highlight" else def_accent)
+            data = _build_preset_json(kind, frames, accent, def_bg)
+            os.makedirs(os.path.dirname(os.path.abspath(out_p)), exist_ok=True)
+            with open(out_p, "w", encoding="utf-8") as f:
+                json.dump(data, f, separators=(",", ":"))
+            built += 1
+        print(f"[lottie] Batch OK -> generated {built} missing overlay(s) in {args.project_dir}")
+        return
+
+    if not args.kind or not args.out:
+        ap.error("Provide --project-dir OR both (--kind and --out)")
+
     frames = max(24, int(round(args.duration * 30)))
-    if args.kind in ("minimal_lower_third", "lower_third_bar"):
-        data = make_minimal_lower_third(dur_frames=frames, accent=args.accent, dark=args.bg)
-    elif args.kind in ("focus_corner_brackets", "corner_brackets"):
-        data = make_focus_corner_brackets(dur_frames=frames, accent=args.accent)
-    elif args.kind == "handdrawn_underline":
-        data = make_handdrawn_underline(dur_frames=frames, accent=args.accent)
-    elif args.kind == "handdrawn_circle":
-        data = make_handdrawn_circle(dur_frames=frames, accent=args.accent)
-    elif args.kind == "marker_highlight":
-        data = make_marker_highlight(dur_frames=frames, accent=args.accent)
-    elif args.kind == "pointer_arrow":
-        data = make_pointer_arrow(dur_frames=frames, accent=args.accent)
-    else:
-        data = make_pulse_beacon(dur_frames=frames, accent=args.accent)
+    data = _build_preset_json(args.kind, frames, args.accent, args.bg)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:

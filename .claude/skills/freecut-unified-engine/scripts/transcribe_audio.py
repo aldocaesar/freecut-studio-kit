@@ -157,6 +157,35 @@ def write_srt_from_words(words: list, srt_path: str, max_words_per_cue: int = 5)
         f.write("\n".join(lines))
 
 
+def write_compact_words(words: list, compact_path: str, window_ms: int = 8000):
+    """Writes a token-lean word-timestamp digest (~75 lines for a 10-min video vs 6,000 lines in words.json)."""
+    if not words:
+        return
+    lines = [
+        "# Compact Word-Timestamp Index (word@start_s) — Read THIS file instead of words.json or raw audio!"
+    ]
+    chunk = []
+    win_start = words[0]["start_ms"]
+    for w in words:
+        chunk.append(w)
+        tok = str(w.get("word", ""))
+        elapsed = w["end_ms"] - win_start
+        if elapsed >= window_ms or (elapsed >= 4500 and tok.endswith((".", "!", "?", ";"))):
+            s0 = chunk[0]["start_ms"]
+            e0 = chunk[-1]["end_ms"]
+            body = " ".join(f"{x['word']}@{x['start_ms']/1000.0:.2f}" for x in chunk)
+            lines.append(f"[{s0}ms..{e0}ms] {body}")
+            chunk = []
+            win_start = e0
+    if chunk:
+        s0 = chunk[0]["start_ms"]
+        e0 = chunk[-1]["end_ms"]
+        body = " ".join(f"{x['word']}@{x['start_ms']/1000.0:.2f}" for x in chunk)
+        lines.append(f"[{s0}ms..{e0}ms] {body}")
+    with open(compact_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def _prepare_windows_cuda_dlls() -> bool:
     """Register pip-installed NVIDIA cuBLAS/cuDNN DLL folders on Windows and verify cublas loads."""
     if os.name != "nt":
@@ -412,6 +441,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     words_path = os.path.join(args.out_dir, "words.json")
     srt_out_path = os.path.join(args.out_dir, "subtitles.srt")
+    compact_path = os.path.join(args.out_dir, "words_compact.txt")
 
     # 1. Instant SRT path
     if args.from_srt and os.path.isfile(args.from_srt):
@@ -420,8 +450,9 @@ def main():
             json.dump(words, f, ensure_ascii=False, indent=2)
         if os.path.abspath(args.from_srt) != os.path.abspath(srt_out_path):
             write_srt_from_words(words, srt_out_path)
+        write_compact_words(words, compact_path)
         dur = (words[-1]["end_ms"] / 1000.0) if words else 0.0
-        print(f"[transcribe] OK (SRT) -> {len(words)} words ({dur:.1f}s) saved to {words_path}")
+        print(f"[transcribe] OK (SRT) -> {len(words)} words ({dur:.1f}s) saved to {compact_path} + {words_path}")
         return
 
     # Ensure clean audio if video was provided
@@ -474,9 +505,10 @@ def main():
     with open(words_path, "w", encoding="utf-8") as f:
         json.dump(words, f, ensure_ascii=False, indent=2)
     write_srt_from_words(words, srt_out_path)
+    write_compact_words(words, compact_path)
 
     dur = (words[-1]["end_ms"] / 1000.0) if words else 0.0
-    print(f"[transcribe] OK [{engine_used}] -> {len(words)} words ({dur:.1f}s) | {words_path} + {srt_out_path}")
+    print(f"[transcribe] OK [{engine_used}] -> {len(words)} words ({dur:.1f}s) | {compact_path} + {srt_out_path}")
 
 
 if __name__ == "__main__":

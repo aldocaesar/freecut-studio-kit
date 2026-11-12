@@ -182,12 +182,16 @@ def main():
     for k, purpose in [
         ("GROQ_API_KEY", "Optional cloud ultra-fast Whisper (fallback: FREE local faster-whisper)"),
         ("ASSEMBLYAI_API_KEY", "Optional cloud AssemblyAI Universal-2 (fallback: FREE local faster-whisper)"),
-        ("PEXELS_API_KEY", "Optional high-res stock B-roll (fallback: Wikimedia/Bing/DDG/YouTube)"),
+        ("PEXELS_API_KEY", "Optional high-res stock B-roll (fallback: scraped HD photos + YouTube)"),
         ("PIXABAY_API_KEY", "Optional stock video/image fallback"),
         ("ELEVENLABS_API_KEY", "Optional premium TTS (fallback: FREE edge-tts)"),
     ]:
         present = bool(env_vars.get(k))
         print(f"  [{'SET ' if present else 'FREE'}] {k:20s} : {'Configured' if present else purpose}")
+
+    marker_path = os.path.join(root, ".freecut-setup-done.json")
+    onboarded = os.path.isfile(marker_path)
+    print(f"  [{'DONE' if onboarded else 'NEW '}] {'ONBOARDING_STATE':20s} : {'Completed (.freecut-setup-done.json)' if onboarded else 'First run on this workspace — ask optional keys once then run bootstrap_env.py --mark-onboarded'}")
 
     print("\n" + "=" * 72)
     if critical_failures:

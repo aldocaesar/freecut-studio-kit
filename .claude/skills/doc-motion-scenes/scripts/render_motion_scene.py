@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-Deterministic Headless Motion Graphics Renderer for FreeCut (v6.0)
+Deterministic Headless Motion Graphics Renderer for FreeCut (v6.4)
 Renders self-contained HTML/CSS/SVG/Canvas/WebGL/MapLibre scenes frame-by-frame
-into crisp H.264 MP4 @ 30fps across ANY aspect ratio (16:9, 9:16, 4:5, 1:1)
-+ mid-scene Vision QA preview frame.
+into crisp H.264 MP4 @ 30fps across ANY aspect ratio (16:9, 9:16, 4:5, 1:1),
+using native ThreadPoolExecutor(max_workers=3) + automatic paginated
+`motion/motion_contact_sheet.jpg` (3 frames per scene: 20%, 55%, 85%).
 
 Scene contract:
-  window.__setFrame(frameIdx, fps)  -> updates DOM/SVG/Canvas synchronously (or returns a Promise)
+  window.__setFrame(frameIdx, fps) -> updates DOM/SVG/Canvas synchronously (or returns a Promise)
 
 Usage:
-  python render_motion_scene.py --html motion/S07.html --out motion/S07.mp4 --duration 6.5
   python render_motion_scene.py --project-dir ./my_project
+  python render_motion_scene.py --project-dir ./my_project --workers 3 --force
+  python render_motion_scene.py --html motion/S07.html --out motion/S07.mp4 --duration 6.5
 """
 import argparse
+import concurrent.futures
+import io
 import json
 import os
 import pathlib
@@ -36,6 +40,8 @@ except Exception:
     except Exception:
         pass
 
+from PIL import Image, ImageDraw, ImageFont, ImageOps  # noqa: E402
+
 ASPECT_DIMENSIONS = {
     "16:9": (1920, 1080),
     "9:16": (1080, 1920),
@@ -55,6 +61,20 @@ def resolve_dimensions(sb: dict, cli_w: int = None, cli_h: int = None):
     return int(sb.get("width") or w), int(sb.get("height") or h)
 
 
+def _extract_cached_frames(mp4_path: str, duration_s: float) -> list[bytes]:
+    frames = []
+    for pct in (0.20, 0.55, 0.85):
+        ts = max(0.05, duration_s * pct)
+        cmd = [
+            "ffmpeg", "-nostdin", "-ss", f"{ts:.2f}", "-i", mp4_path,
+            "-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "3", "-",
+        ]
+        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True)
+        if res.returncode == 0 and res.stdout:
+            frames.append(res.stdout)
+    return frames
+
+
 def render_html_to_mp4(
     html_path: str,
     out_mp4: str,
@@ -63,20 +83,43 @@ def render_html_to_mp4(
     width: int = 1920,
     height: int = 1080,
     preview_jpg: str = None,
-):
+    force: bool = False,
+) -> list[bytes]:
     from playwright.sync_api import sync_playwright
 
     abs_html = os.path.abspath(html_path)
     if not os.path.isfile(abs_html):
         raise FileNotFoundError(f"Motion HTML scene not found: {abs_html}")
 
-    os.makedirs(os.path.dirname(os.path.abspath(out_mp4)), exist_ok=True)
+    abs_out = os.path.abspath(out_mp4)
+    os.makedirs(os.path.dirname(abs_out), exist_ok=True)
     total_frames = max(1, int(round(duration_s * fps)))
+
+    # Incremental cache skip when MP4 is already newer than HTML
+    if (
+        not force
+        and os.path.isfile(abs_out)
+        and os.path.getsize(abs_out) >= 2000
+        and os.path.getmtime(abs_out) >= os.path.getmtime(abs_html)
+    ):
+        samples = _extract_cached_frames(abs_out, duration_s)
+        if preview_jpg and samples and not os.path.isfile(preview_jpg):
+            with open(preview_jpg, "wb") as pf:
+                pf.write(samples[min(1, len(samples) - 1)])
+        print(f"[render_motion] CACHED -> {out_mp4} ({total_frames}f @ {fps}fps)", flush=True)
+        return samples
+
     mid_frame = max(0, int(total_frames * 0.68))
+    sample_indices = {
+        max(0, int(total_frames * 0.20)): 0,
+        max(0, int(total_frames * 0.55)): 1,
+        max(0, min(total_frames - 1, int(total_frames * 0.85))): 2,
+    }
+    sampled_bytes = [None, None, None]
     file_url = pathlib.Path(abs_html).as_uri()
 
     ffmpeg_cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-nostdin", "-y",
         "-f", "image2pipe",
         "-vcodec", "mjpeg",
         "-framerate", str(fps),
@@ -87,7 +130,7 @@ def render_html_to_mp4(
         "-crf", "17",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-        os.path.abspath(out_mp4),
+        abs_out,
     ]
 
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -107,7 +150,6 @@ def render_html_to_mp4(
             page.evaluate("() => document.fonts ? document.fonts.ready : Promise.resolve()")
         except Exception:
             pass
-        # Support optional async scene boot (e.g. MapLibre style load or image decode)
         try:
             page.evaluate("() => window.__readyPromise ? window.__readyPromise : Promise.resolve()")
         except Exception:
@@ -121,9 +163,11 @@ def render_html_to_mp4(
             raise RuntimeError(f"Scene {html_path} must define window.__setFrame(frameIdx, fps)")
 
         for f_idx in range(total_frames):
-            page.evaluate(f"([f, r]) => Promise.resolve(window.__setFrame(f, r))", [f_idx, fps])
+            page.evaluate("([f, r]) => Promise.resolve(window.__setFrame(f, r))", [f_idx, fps])
             jpg_bytes = page.screenshot(type="jpeg", quality=93, animations="disabled")
             proc.stdin.write(jpg_bytes)
+            if f_idx in sample_indices:
+                sampled_bytes[sample_indices[f_idx]] = jpg_bytes
             if preview_jpg and f_idx == mid_frame:
                 os.makedirs(os.path.dirname(os.path.abspath(preview_jpg)), exist_ok=True)
                 with open(preview_jpg, "wb") as pf:
@@ -137,10 +181,68 @@ def render_html_to_mp4(
     if ret != 0:
         raise RuntimeError(f"FFmpeg encode failed ({ret}): {stderr_bytes.decode('utf-8', errors='ignore')[-500:]}")
 
-    if not os.path.isfile(out_mp4) or os.path.getsize(out_mp4) < 2000:
+    if not os.path.isfile(abs_out) or os.path.getsize(abs_out) < 2000:
         raise RuntimeError(f"Rendered MP4 invalid or empty: {out_mp4}")
 
-    print(f"[render_motion] OK -> {out_mp4} ({total_frames}f @ {fps}fps, {width}x{height}, {duration_s:.2f}s)")
+    print(f"[render_motion] OK -> {out_mp4} ({total_frames}f @ {fps}fps, {width}x{height}, {duration_s:.2f}s)", flush=True)
+    return [b for b in sampled_bytes if b is not None]
+
+
+def render_motion_contact_sheets(records: list[dict], motion_dir: str, max_rows_per_sheet: int = 8) -> list[str]:
+    """Builds paginated `motion/motion_contact_sheet.jpg` grids (<=8 motion scenes per sheet, 3 frames per row)."""
+    if not records:
+        return []
+    os.makedirs(motion_dir, exist_ok=True)
+    try:
+        font_hdr = ImageFont.truetype("arialbd.ttf", 19)
+        font_sub = ImageFont.truetype("arial.ttf", 15)
+    except Exception:
+        font_hdr = ImageFont.load_default()
+        font_sub = font_hdr
+
+    total_batches = (len(records) + max_rows_per_sheet - 1) // max_rows_per_sheet
+    out_paths = []
+    sheet_w = 1650
+    row_h = 320
+    pad_top = 64
+
+    for b_idx in range(total_batches):
+        batch = records[b_idx * max_rows_per_sheet : (b_idx + 1) * max_rows_per_sheet]
+        sheet_h = pad_top + len(batch) * row_h + 24
+        canvas = Image.new("RGB", (sheet_w, sheet_h), (14, 18, 26))
+        draw = ImageDraw.Draw(canvas)
+        title = f"MOTION GRAPHICS QA CONTACT SHEET — BATCH {b_idx + 1}/{total_batches} (Verify maps, chart axes, cutouts & zero clipped text)"
+        draw.text((24, 20), title, fill=(248, 250, 252), font=font_hdr)
+
+        for r_i, rec in enumerate(batch):
+            y0 = pad_top + r_i * row_h
+            draw.rectangle([16, y0, sheet_w - 16, y0 + row_h - 12], fill=(22, 28, 38), outline=(45, 55, 72), width=1)
+            hdr = f"{rec['sid']} • {rec['dur_s']:.1f}s ({int(round(rec['dur_s']*rec['fps']))}f) • {rec['brief'][:115]}"
+            draw.text((30, y0 + 10), hdr, fill=(251, 191, 36), font=font_hdr)
+
+            labels = ("20% Entrada", "55% Meio", "85% Final")
+            frames = rec.get("samples") or []
+            thumb_w, thumb_h = 505, 255
+            for c_i in range(3):
+                tx = 30 + c_i * (thumb_w + 22)
+                ty = y0 + 44
+                if c_i < len(frames) and frames[c_i]:
+                    with Image.open(io.BytesIO(frames[c_i])) as im:
+                        th = ImageOps.contain(im.convert("RGB"), (thumb_w, thumb_h), Image.Resampling.LANCZOS)
+                        paste_x = tx + (thumb_w - th.width) // 2
+                        paste_y = ty + (thumb_h - th.height) // 2
+                        draw.rectangle([tx, ty, tx + thumb_w, ty + thumb_h], fill=(10, 12, 18), outline=(65, 78, 98), width=1)
+                        canvas.paste(th, (paste_x, paste_y))
+                else:
+                    draw.rectangle([tx, ty, tx + thumb_w, ty + thumb_h], fill=(35, 20, 20), outline=(180, 60, 60), width=2)
+                draw.rectangle([tx + 6, ty + 6, tx + 132, ty + 28], fill=(12, 16, 23))
+                draw.text((tx + 12, ty + 9), labels[c_i], fill=(226, 232, 240), font=font_sub)
+
+        fname = "motion_contact_sheet.jpg" if b_idx == 0 else f"motion_contact_sheet_batch_{b_idx + 1}.jpg"
+        out_p = os.path.join(motion_dir, fname)
+        canvas.save(out_p, "JPEG", quality=90)
+        out_paths.append(out_p)
+    return out_paths
 
 
 def main():
@@ -153,6 +255,8 @@ def main():
     ap.add_argument("--height", type=int, default=None)
     ap.add_argument("--project-dir", help="Batch render all MOTION_SCENE entries in storyboard.json")
     ap.add_argument("--scene", nargs="*", help="Optional filter of scene IDs in --project-dir mode")
+    ap.add_argument("--workers", type=int, default=3, help="Parallel Playwright render workers (default: 3)")
+    ap.add_argument("--force", action="store_true", help="Re-render even if MP4 is newer than HTML")
     args = ap.parse_args()
 
     if args.project_dir:
@@ -177,7 +281,7 @@ def main():
             print("[render_motion] No MOTION_SCENE entries found in storyboard.json.")
             return
 
-        for sc in motion_scenes:
+        def _job(sc: dict) -> dict:
             sid = sc["id"]
             dur_s = max(1.5, (sc["end_ms"] - sc["start_ms"]) / 1000.0)
             html_file = sc.get("motion_html") or os.path.join(motion_dir, f"{sid}.html")
@@ -185,7 +289,24 @@ def main():
                 html_file = os.path.join(args.project_dir, html_file)
             out_mp4 = os.path.join(motion_dir, f"{sid}.mp4")
             prev_jpg = os.path.join(motion_dir, f"{sid}_preview.jpg")
-            render_html_to_mp4(html_file, out_mp4, dur_s, fps=fps, width=w, height=h, preview_jpg=prev_jpg)
+            samples = render_html_to_mp4(
+                html_file, out_mp4, dur_s, fps=fps, width=w, height=h, preview_jpg=prev_jpg, force=args.force
+            )
+            brief = sc.get("motion_brief") or sc.get("headline") or sc.get("narration") or sid
+            return {"sid": sid, "dur_s": dur_s, "fps": fps, "brief": str(brief).replace("\n", " "), "samples": samples}
+
+        workers = max(1, min(int(args.workers or 3), len(motion_scenes)))
+        results_by_id = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_job, sc): sc["id"] for sc in motion_scenes}
+            for fut in concurrent.futures.as_completed(futs):
+                sid = futs[fut]
+                results_by_id[sid] = fut.result()
+
+        ordered_records = [results_by_id[sc["id"]] for sc in motion_scenes if sc["id"] in results_by_id]
+        sheets = render_motion_contact_sheets(ordered_records, motion_dir)
+        for sp in sheets:
+            print(f"[render_motion] Motion QA contact sheet ready: {sp}", flush=True)
         return
 
     if not (args.html and args.out and args.duration):
@@ -194,7 +315,7 @@ def main():
     w = args.width or 1920
     h = args.height or 1080
     prev = os.path.splitext(args.out)[0] + "_preview.jpg"
-    render_html_to_mp4(args.html, args.out, args.duration, fps=args.fps, width=w, height=h, preview_jpg=prev)
+    render_html_to_mp4(args.html, args.out, args.duration, fps=args.fps, width=w, height=h, preview_jpg=prev, force=args.force)
 
 
 if __name__ == "__main__":

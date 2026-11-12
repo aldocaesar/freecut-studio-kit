@@ -168,8 +168,9 @@ def main():
     with open(words_path, "w", encoding="utf-8") as f:
         json.dump(words, f, ensure_ascii=False, indent=2)
 
-    from transcribe_audio import write_srt_from_words
+    from transcribe_audio import write_compact_words, write_srt_from_words
     write_srt_from_words(words, os.path.join(args.out_dir, "subtitles.srt"))
+    write_compact_words(words, os.path.join(args.out_dir, "words_compact.txt"))
 
     dur = (words[-1]["end_ms"] / 1000.0) if words else 0.0
     print(f"[voiceover] OK ({args.engine}) -> {out_mp3} ({dur:.1f}s, {len(words)} words aligned)")

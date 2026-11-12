@@ -1,6 +1,6 @@
-# FreeCut Universal Studio Kit (v6.3)
+# FreeCut Universal Studio Kit (v6.4)
 
-Transforma **qualquer IA multimodal (OpenBot, Claude Code, Gemini / Antigravity ou Codex / Cursor)** em um **Editor de Vídeo Sênior e Diretor de Arte autônomo** para o [FreeCut (`walterlow/freecut` v15)](https://github.com/walterlow/freecut), atendendo qualquer formato (`16:9`, `9:16`, `4:5`, `1:1`) e estilo (Documentário, Explainer, Talking-Head/A-Roll, Produto/UI, Dados & Mapas), **100% gratuito e sem chaves pagas obrigatórias**.
+Transforma **qualquer IA multimodal (OpenBot, Claude Code, Gemini / Antigravity ou Codex / Cursor)** em um **Editor de Vídeo Sênior e Diretor de Arte autônomo** para o [FreeCut (`walterlow/freecut` v15)](https://github.com/walterlow/freecut), atendendo qualquer formato (`16:9`, `9:16`, `4:5`, `1:1`) e vídeos curtos ou longos (**10 a 20+ minutos sem estourar janela de contexto**), **100% gratuito e sem chaves pagas obrigatórias**.
 
 ---
 
@@ -38,13 +38,13 @@ chmod +x install.sh
 
 ---
 
-## O Que Está Incluso no Kit (v6.3)
+## O Que Está Incluso no Kit (v6.4)
 
 | Módulo / Skill | O que faz automaticamente | Custo / Chave |
 |---|---|---|
-| **`freecut-unified-engine`** | Auto-setup em PC limpo, transcrição word-by-word (`faster-whisper` GPU/CPU), narração neural (`edge-tts`), corte de silêncio A-roll (`cut_aroll.py`), caça de mídia exata com filtro OCR + recorte PNG transparente (`rembg` em `fetch_media.py`), montagem nativa v15 (`assemble_freecut.py`) e validador anti-vício (`validate_freecut.py`) | **100% Grátis** |
-| **`doc-art-director`** | Edição criativa autônoma a partir só do áudio, decupagem sincronizada na palavra (`anchor_word`), zonas seguras (`16:9`, `9:16`, `4:5`, `1:1`), tipografia editorial multi-fonte (`textSpans` em 7 fontes), animações nativas (`textMotion` + `motionModifiers`) e 3 arquétipos de recorte sem repetição | **100% Grátis** |
-| **`doc-motion-scenes`** | Cenas de Motion Graphics em 30fps com cartografia geodésica real de **242 países** (`world-atlas.js` Natural Earth offline + MapLibre GL), gráficos monotônicos sem colisão de texto e recortes reais integrados | **100% Grátis** |
-| **`doc-lottie-overlays`** | Overlays vetoriais Bodymovin/Lottie (`<15 KB`: grifo marca-texto, setas, lower-thirds, cantoneiras de foco) sincronizados na fala + kit completo de SFX foley | **100% Grátis** |
+| **`freecut-unified-engine`** | Auto-setup em PC virgem + gravação de `.freecut-setup-done.json` após o 1º onboarding, índice enxuto `words_compact.txt` (~90% menos tokens em áudios longos), narração neural (`edge-tts`), corte A-roll (`cut_aroll.py`), caça paralela Zero-API (Bing/News/Wikimedia/Openverse/Yandex) ou c/ `PEXELS_API_KEY` opcional + recorte `rembg`, Vision QA isolado em subagente e finalizador 4-em-1 `finish_freecut.py` | **100% Grátis** |
+| **`doc-art-director`** | Edição criativa autônoma a partir só do áudio ou pasta, schema inline enxuto (sem precisar ler `.py`), decupagem sincronizada na palavra (`anchor_word`), zonas seguras (`16:9`, `9:16`, `4:5`, `1:1`), tipografia multi-fonte (`textSpans`), `textMotion` + `motionModifiers` e 3 arquétipos de recorte sem repetição | **100% Grátis** |
+| **`doc-motion-scenes`** | Cenas de Motion Graphics em 30fps renderizadas em paralelo (`ThreadPoolExecutor(max_workers=3)` com cache incremental) + geração automática de `motion/motion_contact_sheet.jpg`, cartografia geodésica real de **242 países** (`world-atlas.js` offline + MapLibre GL) e gráficos sem colisão | **100% Grátis** |
+| **`doc-lottie-overlays`** | Geração em lote (`--project-dir` em `< 0.2s`) de overlays vetoriais Bodymovin/Lottie (`<15 KB`: grifo marca-texto, setas, lower-thirds, cantoneiras de foco) sincronizados na fala + kit completo de SFX foley | **100% Grátis** |
 
 Consulte também o guia detalhado em [`COMO-USAR-E-COMPARTILHAR.md`](./COMO-USAR-E-COMPARTILHAR.md).

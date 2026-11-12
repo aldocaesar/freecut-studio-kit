@@ -212,12 +212,23 @@ def main():
     ap = argparse.ArgumentParser(description="Auto-install Editor-FreeCut runtime dependencies on a fresh machine.")
     ap.add_argument("--with-freecut-ui", help="Optional folder where walterlow/freecut web UI should be cloned & installed")
     ap.add_argument("--setup-keys", action="store_true", help="Interactively configure optional accelerator API keys (.env) anytime")
+    ap.add_argument("--mark-onboarded", action="store_true", help="Write .freecut-setup-done.json marker after one-time onboarding")
     ap.add_argument("--force", action="store_true", help="Run installers even if doctor.py already reports READY")
     args = ap.parse_args()
 
+    ws_root = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", ".."))
+    marker_file = os.path.join(ws_root, ".freecut-setup-done.json")
+
     if args.setup_keys:
-        ws_env = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", "..", ".env"))
+        ws_env = os.path.join(ws_root, ".env")
         setup_optional_env_keys(ws_env)
+        args.mark_onboarded = True
+
+    if args.mark_onboarded:
+        import json as _json
+        with open(marker_file, "w", encoding="utf-8") as mf:
+            _json.dump({"version": "6.4", "onboarded": True}, mf)
+        print(f"[bootstrap] Onboarding marker saved -> {marker_file}", flush=True)
 
     if not args.force and os.path.isfile(DOCTOR_SCRIPT):
         probe = subprocess.run([sys.executable, DOCTOR_SCRIPT], stdin=subprocess.DEVNULL, capture_output=True, text=True)

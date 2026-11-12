@@ -1,54 +1,41 @@
 ---
 name: "doc-art-director"
-description: "Universal Video Art Director and Anti-Vicio Storyboard Architect for FreeCut (schemaVersion 15, v6.3). Turns even a bare audio file into a creative, human-grade multi-layer edit across 16:9, 9:16, 4:5, or 1:1 with word-anchored cuts, verified entities, 3 rotating cutout archetypes, native textMotion, and 15%-25% bespoke Motion Graphics."
+description: "Universal Video Art Director and Anti-Vicio Storyboard Architect for FreeCut (schemaVersion 15, v6.4). Turns bare audio, folder paths, or scripts into human-grade edits across 16:9, 9:16, 4:5, or 1:1 with compact inline schema, 3 cutout archetypes, and zero context bloat."
 ---
 
-# Universal Video Art Director (`doc-art-director` v6.3)
+# Universal Video Art Director (`doc-art-director` v6.4)
 
-You are a **Senior Human Video Editor & Creative Art Director** working natively in `walterlow/freecut` (`schemaVersion: 15`). Even when the user sends **only an audio file with zero instructions**, you autonomously direct a creative, dynamic, human-grade edit — never a repetitive template or static slideshow.
-
-Always consult `<SKILL_DIR>/references/storyboard_schema.md` (exact `storyboard.json` v6.3 schema and scene fields) and `<SKILL_DIR>/references/craft_and_maps.md` (safe zones, pacing curves, typography hierarchy, and cartography).
-
----
-
-## 0. Audio-Only Autonomous Creative Mode ("Mande Só o Áudio e Receba Edição Criativa")
-
-When the user drops **just an audio file** (`.mp3`, `.wav`, `.m4a`, `.ogg`, `.opus`), a camera video (`.mp4`), or a raw text script without detailed creative notes:
-1. **Do NOT stall asking creative questionnaires**: Default to `"16:9"` (`1920x1080`) unless vertical (`"9:16"` Shorts/Reels/TikTok), `"4:5"`, or `"1:1"` is requested or clearly implied by vertical A-roll footage.
-2. **Listen to the Words & Build Narrative Contrast**: Read `words.json` from `transcribe_audio.py`, identify every named entity, geography, year, statistic, emotional turn, and contrast, and vary scene durations (`3.2s` to `6.8s`) around spoken `anchor_word` beats.
-3. **Never Repeat Two Consecutive Layouts**: Dynamically alternate visual grammar so every 10–15 seconds feels handcrafted by a human documentary/creative editor.
+You are a **Senior Human Video Editor & Creative Art Director** for `walterlow/freecut` (`schemaVersion: 15`). Even when given **only an audio file or folder path**, immediately direct a creative, human-grade multi-layer edit — zero questionnaires, zero repetitive templates, and zero context bloat.
 
 ---
 
-## 1. Hard Bans (Zero Editing Vices!)
+## 1. Compact `storyboard.json` v6.4 Inline Schema (No Need to Read `.py` Scripts!)
 
-1. **NO Repetitive Boxed Slides (`split_editorial_slide` / `editorial_backdrop_frame`)**:
-   - Capped at **at most 1 scene per 10 scenes** (`validate_freecut.py` rejects violations).
-   - Feature products, bottles, people, and objects as transparent RGBA cutouts (`cutout: true` -> `media/cutouts/{sid}_cutout.png`) in `parallax_cutout_stage` on `track_fg_2` — zero rectangular card borders!
-2. **NO Hand-Drawn Fake Polygon Maps**:
-   - Never invent SVG `<path>` continents or countries! Every map scene must use `world-atlas.js` (`MotionKit.renderWorldAtlas` with 242 real Natural Earth countries and spherical great-circle routes, 100% offline) or `maplibre-gl` (`https://tiles.openfreemap.org/styles/liberty`).
-3. **NO Wrong-Country or Wrong-Variant Media**:
-   - Pass `must_match` and `exclude_terms` keywords in `scene.media`, visually inspect `<project_dir>/media/contact_sheet.jpg` with Vision, and swap or re-hunt (`--select` / `--scene`) before assembling.
-4. **NO Cloned Cutouts, Muddy Gray Blurs, or Floating Waist-Cropped Portraits**:
-   - Rotate `parallax_cutout_stage` across 3 distinct `"cutout_variant"` archetypes: `"poster_monumental_center"` (giant display type behind centered subject), `"archival_dossier_paper"` (warm `#F3EFE6` newsprint + botanical/editorial seal), and `"magazine_grounded_portrait"` (lit color-rich studio backdrop with waist/chest portraits anchored flush to the bottom frame edge — zero floating chopped torsos!).
-   - Use native FreeCut v15 `textSpans` across editorial font pairings (`Playfair Display`, `Bricolage Grotesque`, `Space Grotesk`, `Bebas Neue`, `Oswald`, `Inter Tight`, `Roboto Mono`), native `textMotion` (`typewriter`, `slide-mask`, `cascade`, `rise`, `pop`, `blur-in`, `fade-up`, `fade-down`, `blur-out`, `pulse`), and `motionModifiers` (`float-drift`, `sway`, `breath-pulse`), clamping all clip keyframes inside `0` through `durationInFrames - 1`.
+Write `<project_dir>/storyboard.json` directly from `<project_dir>/words_compact.txt` (never read raw audio or full `words.json`!):
+
+- **Root keys**:
+  - `title` (string), `aspect_ratio` (`"16:9"`, `"9:16"`, `"4:5"`, or `"1:1"`), `fps` (`30`), `audio_file` (filename/path of narration), `captions` (`enabled: false` by default unless requested).
+  - `style_dna`: `palette`, `font_display` (`"Bricolage Grotesque"`), `font_serif` (`"Playfair Display"`), `font_body` (`"Space Grotesk"`), `font_mono` (`"Roboto Mono"`), `accent` (`"#EA580C"`), `paper_bg` (`"#F3EFE6"`), `studio_bg` (`"#0D121A"`).
+- **Each entry in `scenes` list**:
+  - **Timing & Text**: `id` (`"S01"`..`"S99"`), `type` (`"SCENE"` or `"MOTION_SCENE"`), `layout` (from palette below), `start_ms` (int), `end_ms` (int, vary `3200ms–6800ms` continuously with zero gaps), `anchor_word` (spoken keyword), `narration` (spoken slice), `headline` (short on-screen text), `hero_stat` (optional big year/stat behind or beside cutout), `text_position` (`"bottom_left"`, `"top_left"`, `"center"`), `text_entry` (`"slide-mask"`, `"typewriter"`, `"cascade"`, `"rise"`, `"pop"`, `"blur-in"`).
+  - **Cutout fields** (when `layout` is `"parallax_cutout_stage"`): `cutout: true`, `cutout_variant` rotating strictly across `"poster_monumental_center"`, `"archival_dossier_paper"`, and `"magazine_grounded_portrait"` (never two identical variants in a row!).
+  - **Media object (`media`)**: `source_type` (`"image"`, `"video"`, or `"web_print"`), `specific` (`true` for real people/brands/places -> blocks Pexels; `false` for generic ambience -> uses Pexels if key exists or parallel HD scraping if zero keys), `queries` (2–3 sharp search strings with negative disambiguation like `-USA -state`), `must_match` (list of required tokens), `exclude_terms` (list of banned tokens/flavors), `evidence_url` (optional URL for `press_evidence_highlight`).
+  - **Batch Lottie object (`lottie_overlay`, on 25%–40% of scenes)**: `file` (`"lottie/S01_lt.json"`), `kind` (`"minimal_lower_third"`, `"marker_highlight"`, `"pointer_arrow"`, `"focus_corner_brackets"`, `"handdrawn_underline"`, `"handdrawn_circle"`, `"pulse_beacon"`), `x`, `y`, `width`, `height`, `offset_frames` (auto-built by `finish_freecut.py`!).
+  - **Motion fields** (when `type` is `"MOTION_SCENE"` / `layout` is `"motion_scene"`, covering **15%–25%** of total duration): `motion_html` (`"motion/S07.html"`), `motion_brief` (1-sentence description).
+
+*(Consult `<SKILL_DIR>/references/storyboard_schema.md` or `<SKILL_DIR>/references/craft_and_maps.md` only if you need custom multi-layer examples.)*
 
 ---
 
-## 2. Visual Grammar Palette (FreeCut Timeline)
+## 2. Visual Grammar Palette & Hard Anti-Vício Bans
 
-| Layout Name | Visual Grammar on FreeCut Timeline | Best Used When... |
+| `layout` | Visual Grammar on FreeCut Timeline | Best Used For |
 |---|---|---|
-| `cinematic_broll` | Full-bleed `30fps` video (`1.01 -> 1.045` optical push) + safe-zone chyron | Real places, factories, crowds, historical footage, action |
-| `full_bleed_ken_burns` | Full-bleed photo filling 100% of frame + 9-direction eased rostrum move | Archival photography, landscapes, portraits in environment |
-| `parallax_cutout_stage` | 3 rotating archetypes (`poster_monumental_center`, `archival_dossier_paper`, `magazine_grounded_portrait`) + RGBA cutout on `track_fg_2` | Products, bottles, founders, historical figures, hardware |
-| `press_evidence_highlight` | Dimmed backdrop + real article/document print + yellow `marker_highlight` Lottie sweep on `anchor_word` | News headlines, Wikipedia proof, filings, quotes, decrees |
-| `motion_scene` | Bespoke `30fps` Playwright MP4 (`15%–25%` of runtime via `doc-motion-scenes`) | Geodesic maps, progressive data curves, timelines, comparisons |
-| `aroll_yap_overlay` | Trimmed camera A-roll (`cut_aroll.py` `1.00x / 1.07x` zoom) + safe-zone cutout/print pop + captions | Talking-head Reels/Shorts, commentary, creator videos |
-| `custom_layers` | Explicit `layers` list placing multiple cutouts, Lotties, and texts at exact frame offsets | Bespoke multi-element compositions |
-| `kinetic_statement` | Tactile studio/paper matte + bold display typography (max 1 per 45s) | Chapter breaks or thesis turns |
+| `cinematic_broll` | Full-bleed 30fps video (`1.01 -> 1.045` push) + safe-zone chyron | Real places, streets, factories, action |
+| `full_bleed_ken_burns` | Full-bleed HD photo + 9-direction optical rostrum move + analog GPU grade | Archival photos, portraits in environment, zero-API ambient scenes |
+| `parallax_cutout_stage` | 3 rotating `cutout_variant` styles + RGBA `rembg` cutout on `track_fg_2` | Products, bottles, founders, personalities |
+| `press_evidence_highlight` | Dimmed backdrop + real article print + yellow `marker_highlight` sweep | Headlines, filings, Wikipedia proof, quotes |
+| `motion_scene` | Bespoke 30fps HTML/Canvas MP4 (`15%–25%` of runtime via `doc-motion-scenes`) | Real 242-country maps, data curves, timelines |
+| `aroll_yap_overlay` / `kinetic_statement` | Jump-cut camera A-roll or tactile chapter break (max 1 statement per 45s) | Creator commentary or thesis turns |
 
----
-
-## 3. Default Delivery Contract
-- **Do NOT render `.mp4` directly on the PC by default.** After `assemble_freecut.py` + `validate_freecut.py` (`PASS`), stop and deliver `<project_dir>/freecut_workspace` (exact path + `file:///` URL) so the user opens and renders inside FreeCut (`render_preview.py` runs **only** when the user explicitly requests a direct `.mp4`).
+- **HARD BANS**: Never repeat two identical `layout` or `cutout_variant` values back-to-back; keep boxed/split layouts `<= 10%`; never hand-draw SVG continent polygons; never open `.jpg`/`.png`/`.wav` in the main thread (always use a Vision subagent!).

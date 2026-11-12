@@ -82,6 +82,8 @@ USED_DHASHES = []
 STATE_LOCK = threading.Lock()
 DDG_LOCK = threading.Lock()
 _LAST_DDG_TS = 0.0
+_ZERO_KEY_AMBIENT_VIDEOS = [0]
+_ZERO_KEY_AMBIENT_CAP = [4]
 
 
 def load_env_keys(extra_paths=None) -> dict:
@@ -730,9 +732,19 @@ def fetch_ambient_stock_video(query: str, keys: dict, raw_mp4: str, out_mp4: str
         except Exception:
             continue
 
-    # Zero-key free B-roll fallback when neither Pexels nor Pixabay key is configured
+    # Zero-key free B-roll fallback when neither Pexels nor Pixabay key is configured:
+    # Cap yt-dlp ambient clips per run so zero-API machines never stall on 20+ YouTube downloads,
+    # letting remaining ambient scenes fall through instantaneously to scraped HD Ken Burns photos!
     if not keys.get("PEXELS_API_KEY") and not keys.get("PIXABAY_API_KEY"):
-        return fetch_specific_youtube_clip(f"{query} 4k b-roll footage no talking", raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
+        with STATE_LOCK:
+            used_yt = _ZERO_KEY_AMBIENT_VIDEOS[0]
+            if used_yt < _ZERO_KEY_AMBIENT_CAP[0]:
+                _ZERO_KEY_AMBIENT_VIDEOS[0] = used_yt + 1
+                allow_yt = True
+            else:
+                allow_yt = False
+        if allow_yt:
+            return fetch_specific_youtube_clip(f"{query} 4k b-roll footage no talking", raw_mp4, out_mp4, dur_s, aspect_ratio=aspect_ratio)
     return ""
 
 
@@ -985,11 +997,21 @@ def gather_image_candidates(
                 lambda q=q: search_tmdb_images(q, keys.get("TMDB_API_KEY", ""), universe=universe),
             ]
         else:
-            tasks = [
-                lambda q=q: search_stock_images(q, keys, aspect_ratio=aspect_ratio),
-                lambda q=q: search_wikimedia_images(q, limit=8),
-                lambda q=q: search_openverse_images(q, limit=8),
-            ]
+            has_stock_api = bool(keys.get("PEXELS_API_KEY") or keys.get("PIXABAY_API_KEY"))
+            if has_stock_api:
+                tasks = [
+                    lambda q=q: search_stock_images(q, keys, aspect_ratio=aspect_ratio),
+                    lambda q=q: search_wikimedia_images(q, limit=8),
+                    lambda q=q: search_openverse_images(q, limit=8),
+                ]
+            else:
+                # Zero-API Virgin PC Mode: scrape crisp high-resolution editorial/ambient photography in parallel!
+                tasks = [
+                    lambda q=q: search_bing_images(f"{q} high resolution photography", limit=14),
+                    lambda q=q: search_wikimedia_images(q, limit=10),
+                    lambda q=q: search_openverse_images(q, limit=10),
+                    lambda q=q: search_yandex_images(q, limit=8),
+                ]
 
         batches = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as ex:
@@ -1474,7 +1496,9 @@ def main():
     ap.add_argument("--select", nargs="*", help="Swap specific candidate(s), e.g. --select S02=2 S05=3")
     ap.add_argument("--scene", nargs="*", help="Re-hunt only specific scene ID(s), e.g. --scene S02")
     ap.add_argument("--cutout", nargs="*", help="Force RGBA subject cutout extraction for specific scene ID(s), e.g. --cutout S02 S05")
+    ap.add_argument("--zero-key-video-cap", type=int, default=4, help="Max ambient YouTube B-roll downloads when running without Pexels/Pixabay keys (remaining ambient scenes use scraped HD photos)")
     args = ap.parse_args()
+    _ZERO_KEY_AMBIENT_CAP[0] = max(0, int(args.zero_key_video_cap))
 
     if args.cutout:
         report_path = os.path.join(args.project_dir, "media", "download_report.json")
