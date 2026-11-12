@@ -1,6 +1,6 @@
 ---
-name: doc-lottie-overlays
-description: Generates sleek, <15 KB transparent Bodymovin/Lottie (.json) vector overlays (`minimal_lower_third`, `marker_highlight`, `pointer_arrow`, `focus_corner_brackets`, `handdrawn_underline`, `handdrawn_circle`, `pulse_beacon`) placed natively on FreeCut's `track_fg_3` synced to spoken words.
+name: "doc-lottie-overlays"
+description: "Generates sleek, <15 KB transparent Bodymovin/Lottie (.json) vector overlays (minimal_lower_third, marker_highlight, pointer_arrow, focus_corner_brackets, handdrawn_underline, handdrawn_circle, pulse_beacon) placed natively on FreeCut track_fg_3 synced to spoken words."
 ---
 
 # Editorial Lottie Vector Overlays (`doc-lottie-overlays` v6)

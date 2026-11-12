@@ -1,6 +1,6 @@
 ---
-name: doc-art-director
-description: Universal Video Art Director and Anti-Vicio Storyboard Architect for FreeCut (schemaVersion 15, v6.3). Turns even a bare audio file into a creative, human-grade multi-layer edit across 16:9, 9:16, 4:5, or 1:1 with word-anchored cuts, verified entities, 3 rotating cutout archetypes, native textMotion, and 15%-25% bespoke Motion Graphics.
+name: "doc-art-director"
+description: "Universal Video Art Director and Anti-Vicio Storyboard Architect for FreeCut (schemaVersion 15, v6.3). Turns even a bare audio file into a creative, human-grade multi-layer edit across 16:9, 9:16, 4:5, or 1:1 with word-anchored cuts, verified entities, 3 rotating cutout archetypes, native textMotion, and 15%-25% bespoke Motion Graphics."
 ---
 
 # Universal Video Art Director (`doc-art-director` v6.3)

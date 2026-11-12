@@ -1,6 +1,6 @@
 ---
-name: doc-motion-scenes
-description: Builds bespoke, human-grade 30fps Motion Graphics scenes (15%-25% of video) across 16:9, 9:16, 4:5, and 1:1 with REAL Natural Earth offline GeoJSON cartography (world-atlas.js + MotionKit.renderWorldAtlas), MapLibre street-level vector maps, monotone data curves (MotionKit.renderDataCurve), transparent rembg entity cutouts, 2.5D rostrum camera moves, and optical film grain.
+name: "doc-motion-scenes"
+description: "Builds bespoke, human-grade 30fps Motion Graphics scenes (15%-25% of video) across 16:9, 9:16, 4:5, and 1:1 with REAL Natural Earth offline GeoJSON cartography (world-atlas.js + MotionKit.renderWorldAtlas), MapLibre street-level vector maps, monotone data curves (MotionKit.renderDataCurve), transparent rembg entity cutouts, 2.5D rostrum camera moves, and optical film grain."
 ---
 
 # Documentary & Editorial Motion Scenes (`doc-motion-scenes` v6.3)

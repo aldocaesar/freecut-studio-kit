@@ -1,6 +1,6 @@
 ---
-name: freecut-unified-engine
-description: Universal standalone video production engine for walterlow/freecut (schemaVersion 15, v6.3): auto-installs dependencies on any fresh PC from GitHub, runs FREE local faster-whisper word-level transcription (+ .srt / optional Groq & AssemblyAI), FREE edge-tts voiceover, A-roll silence trimmer (cut_aroll.py), Multi-Source Entity Hunter + rembg RGBA Cutouts + Vision Contact Sheet QA (fetch_media.py), Native Timeline Assembler (assemble_freecut.py), and Anti-Vicio Schema Validator (validate_freecut.py).
+name: "freecut-unified-engine"
+description: "Universal standalone video production engine for walterlow/freecut (schemaVersion 15, v6.3) — auto-installs dependencies on any fresh PC from GitHub, runs FREE local faster-whisper word-level transcription (+ .srt / optional Groq & AssemblyAI), FREE edge-tts voiceover, A-roll silence trimmer (cut_aroll.py), Multi-Source Entity Hunter + rembg RGBA Cutouts + Vision Contact Sheet QA (fetch_media.py), Native Timeline Assembler (assemble_freecut.py), and Anti-Vicio Schema Validator (validate_freecut.py)."
 ---
 
 # FreeCut Unified Engine (`freecut-unified-engine` v6.3)
