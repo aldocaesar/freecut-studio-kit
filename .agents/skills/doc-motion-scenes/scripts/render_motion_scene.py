@@ -16,8 +16,25 @@ import argparse
 import json
 import os
 import pathlib
+import site
 import subprocess
 import sys
+
+_ENGINE_SCRIPTS = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "freecut-unified-engine", "scripts")
+)
+if os.path.isfile(os.path.join(_ENGINE_SCRIPTS, "_runtime_env.py")) and _ENGINE_SCRIPTS not in sys.path:
+    sys.path.insert(0, _ENGINE_SCRIPTS)
+try:
+    import _runtime_env
+    _runtime_env.init()
+except Exception:
+    try:
+        _us = site.getusersitepackages()
+        if _us and os.path.isdir(_us) and _us not in sys.path:
+            sys.path.append(_us)
+    except Exception:
+        pass
 
 ASPECT_DIMENSIONS = {
     "16:9": (1920, 1080),

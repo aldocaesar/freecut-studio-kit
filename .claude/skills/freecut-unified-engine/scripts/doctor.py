@@ -11,8 +11,25 @@ import json
 import os
 import platform
 import shutil
+import site
 import subprocess
 import sys
+
+_HERE_DIR = os.path.dirname(os.path.abspath(__file__))
+_ALT_SCRIPTS = os.path.join(_HERE_DIR, ".agents", "skills", "freecut-unified-engine", "scripts")
+for _d in (_HERE_DIR, _ALT_SCRIPTS):
+    if os.path.isfile(os.path.join(_d, "_runtime_env.py")) and _d not in sys.path:
+        sys.path.insert(0, _d)
+try:
+    import _runtime_env
+    _runtime_env.init()
+except Exception:
+    try:
+        site_u = site.getusersitepackages()
+        if site_u and os.path.isdir(site_u) and site_u not in sys.path:
+            sys.path.append(site_u)
+    except Exception:
+        pass
 
 
 def _check_cmd(cmd: list) -> tuple[bool, str]:

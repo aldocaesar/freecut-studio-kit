@@ -31,6 +31,12 @@ import wave
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+import _runtime_env  # noqa: E402
+_runtime_env.init()
+
 from PIL import Image, ImageDraw, ImageFilter
 import numpy as np
 

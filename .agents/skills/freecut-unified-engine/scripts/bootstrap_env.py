@@ -3,7 +3,7 @@
 bootstrap_env.py — Zero-ZIP First-Run Auto-Installer for Editor-FreeCut (v6.3)
 ==============================================================================
 Enables 1-click sharing of `Editor-FreeCut` via an OpenBot shareable bot link:
-OpenBot's link installs `AGENTS.md` + the 4 `SKILL.md` files; when a new user
+OpenBot's link installs the profile and the 4 `SKILL.md` files; when a new user
 sends their first task on a fresh PC, the bot pulls the kit from its public
 GitHub repo (if `scripts/` is not present yet) and runs `bootstrap_env.py` to
 auto-install missing Python libraries, FFmpeg, and Playwright Chromium with
@@ -12,16 +12,28 @@ zero manual `.zip` files or paid API keys.
 Usage:
   python bootstrap_env.py
   python bootstrap_env.py --with-freecut-ui ./freecut-app
+  python bootstrap_env.py --setup-keys
 """
 import argparse
 import importlib.util
+import io
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
+import urllib.request
+import zipfile
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+import _runtime_env  # noqa: E402
+
+_runtime_env.init()
+
 DOCTOR_SCRIPT = os.path.join(SCRIPT_DIR, "doctor.py")
 
 REQUIRED_PIP_PACKAGES = [
@@ -45,7 +57,16 @@ def _run(cmd, check=False):
     return subprocess.run(cmd, stdin=subprocess.DEVNULL, check=check)
 
 
+def _download_zip(url: str) -> bytes:
+    try:
+        return urllib.request.urlopen(url, timeout=60).read()
+    except Exception:
+        ctx = ssl._create_unverified_context()
+        return urllib.request.urlopen(url, context=ctx, timeout=60).read()
+
+
 def ensure_ffmpeg():
+    _runtime_env.ensure_runtime_paths()
     if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         print("[bootstrap] FFmpeg & FFprobe already on PATH.", flush=True)
         return
@@ -68,9 +89,37 @@ def ensure_ffmpeg():
     elif sys_name == "linux" and shutil.which("apt-get"):
         _run(["sudo", "-n", "apt-get", "update"])
         _run(["sudo", "-n", "apt-get", "install", "-y", "ffmpeg"])
+    _runtime_env.ensure_runtime_paths()
+
+
+def ensure_nodejs():
+    _runtime_env.ensure_runtime_paths()
+    if shutil.which("npm.cmd") or shutil.which("npm"):
+        return
+    sys_name = platform.system().lower()
+    print(f"[bootstrap] Node.js missing — attempting automatic install ({sys_name})...", flush=True)
+    if sys_name == "windows" and shutil.which("winget"):
+        _run(
+            [
+                "winget",
+                "install",
+                "--id",
+                "OpenJS.NodeJS.LTS",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ]
+        )
+    elif sys_name == "darwin" and shutil.which("brew"):
+        _run(["brew", "install", "node"])
+    elif sys_name == "linux" and shutil.which("apt-get"):
+        _run(["sudo", "-n", "apt-get", "update"])
+        _run(["sudo", "-n", "apt-get", "install", "-y", "nodejs", "npm"])
+    _runtime_env.ensure_runtime_paths()
 
 
 def ensure_pip_packages():
+    _runtime_env.ensure_user_site()
     missing_specs = []
     for mod_name, pip_spec in REQUIRED_PIP_PACKAGES:
         if importlib.util.find_spec(mod_name) is None:
@@ -78,8 +127,21 @@ def ensure_pip_packages():
     if not missing_specs:
         print("[bootstrap] All required Python packages already installed.", flush=True)
         return
-    print(f"[bootstrap] Installing {len(missing_specs)} missing Python package(s): {', '.join(missing_specs)}", flush=True)
-    _run([sys.executable, "-m", "pip", "install", "--upgrade"] + missing_specs, check=True)
+    print(
+        f"[bootstrap] Installing {len(missing_specs)} missing Python package(s): {', '.join(missing_specs)}",
+        flush=True,
+    )
+    attempts = [
+        [sys.executable, "-m", "pip", "install", "--upgrade"] + missing_specs,
+        [sys.executable, "-m", "pip", "install", "--user", "--upgrade"] + missing_specs,
+        [sys.executable, "-m", "pip", "install", "--break-system-packages", "--upgrade"] + missing_specs,
+    ]
+    for cmd in attempts:
+        res = _run(cmd, check=False)
+        if res.returncode == 0:
+            _runtime_env.ensure_runtime_paths()
+            return
+    raise RuntimeError(f"Failed to install required Python packages: {missing_specs}")
 
 
 def ensure_playwright_chromium():
@@ -90,10 +152,20 @@ def ensure_playwright_chromium():
 def install_freecut_ui(target_dir: str):
     target_abs = os.path.abspath(target_dir)
     if not os.path.isdir(target_abs):
-        if not shutil.which("git"):
-            print("[bootstrap] WARN: git not found on PATH; cannot clone walterlow/freecut.", flush=True)
-            return
-        _run(["git", "clone", "https://github.com/walterlow/freecut.git", target_abs], check=True)
+        if shutil.which("git"):
+            _run(["git", "clone", "--depth", "1", "https://github.com/walterlow/freecut.git", target_abs], check=True)
+        else:
+            print("[bootstrap] git not found — downloading walterlow/freecut via HTTPS zip...", flush=True)
+            raw = _download_zip("https://github.com/walterlow/freecut/archive/refs/heads/main.zip")
+            tmp_extract = target_abs + "_tmp_zip"
+            shutil.rmtree(tmp_extract, ignore_errors=True)
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                zf.extractall(tmp_extract)
+            entries = [os.path.join(tmp_extract, d) for d in os.listdir(tmp_extract)]
+            src_root = entries[0] if len(entries) == 1 and os.path.isdir(entries[0]) else tmp_extract
+            shutil.move(src_root, target_abs)
+            shutil.rmtree(tmp_extract, ignore_errors=True)
+    ensure_nodejs()
     npm_bin = shutil.which("npm.cmd") or shutil.which("npm")
     if npm_bin:
         subprocess.run([npm_bin, "install"], cwd=target_abs, stdin=subprocess.DEVNULL, check=False)
