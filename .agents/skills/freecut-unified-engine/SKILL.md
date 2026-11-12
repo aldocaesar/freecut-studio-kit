@@ -1,9 +1,9 @@
 ---
 name: "freecut-unified-engine"
-description: "Universal standalone video production engine for walterlow/freecut (Schema v15 + Workspace v2 pre-cache, v7.2) — Virgin-PC first-run onboarding, persistent creator context memory, Pixabay HD stock video/photo + zero-key scraping, bare-audio autonomous editing, instant Chrome cold-open caches, and 1-command finish_freecut.py pipeline."
+description: "Universal standalone video production engine for walterlow/freecut (Schema v15 + Workspace v2 pre-cache, v8.0) — Virgin-PC first-run onboarding, anti-clone creator memory, Pixabay HD stock video/photo + zero-key scraping, chameleon per-video style_dna, bespoke creative LLM motion graphics, and 1-command finish_freecut.py pipeline."
 ---
 
-# FreeCut Unified Engine (`freecut-unified-engine` v7.2)
+# FreeCut Unified Engine (`freecut-unified-engine` v8.0)
 
 Deterministic Python CLI pipeline turning **only an audio file (`.mp3`/`.wav`/`.m4a`), a folder path (audio + optional `.srt`), a camera video, or a text script** into a creative, zero-freeze, instant-opening `walterlow/freecut` project (`freecut_workspace/` + `.freecut.zip`) — **100% standalone, zero mandatory paid APIs, first-class Pixabay API support, persistent creator memory across videos, zero `.pyc` pollution (`-B`), and context-safe for 10–20+ minute videos**.
 
@@ -75,8 +75,8 @@ python -B "<SKILL_DIR>/scripts/fetch_media.py" --project-dir "<project_dir>"
 
 ---
 
-## 3. One-Command v7.2 Finalizer (`finish_freecut.py` -> Stop at `freecut_workspace`!)
-After writing diverse `motion/SXX.html` scenes (`doc-motion-scenes`), run **one command**:
+## 3. One-Command v8.0 Finalizer (`finish_freecut.py` -> Stop at `freecut_workspace`!)
+After writing bespoke, metaphor-driven `motion/SXX.html` scenes (`doc-motion-scenes` — zero canned widgets, each scene uniquely choreographed around the spoken beat and `style_dna`), run **one command**:
 ```bash
 python -B "<SKILL_DIR>/scripts/finish_freecut.py" --project-dir "<project_dir>"
 ```

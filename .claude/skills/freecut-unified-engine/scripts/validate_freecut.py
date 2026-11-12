@@ -20,6 +20,7 @@ against BOTH `walterlow/freecut` (`5ceeeb3`) schemaVersion 15 / Workspace v2 AND
 """
 import argparse
 import collections
+import difflib
 import glob
 import hashlib
 import json
@@ -35,34 +36,34 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 VALID_RESOLUTIONS = {(1920, 1080), (1080, 1920), (1080, 1350), (1080, 1080)}
 MAP_KEYWORDS = ("equador", "equator", "africa", "áfrica", "américa", "america", "oceano", "atlantic", "continent", "mapa", "world map")
-LIGHT_PALETTE_MARKERS = (
-    "warm_archive_paper",
-    "editorial_blush_ivory",
-    "swiss_emerald_ivory",
-    "newsprint_crimson_ink",
-    "terracotta_ochre_sand",
-    "#f4ede1",
-    "#fbf3f1",
-    "#f1f6f3",
-    "#eeeae2",
-    "#f2e5d5",
-    "#f6f2e8",
-    "#faf8f4",
-    "#fffdf8",
+BANNED_CANNED_WIDGETS = (
+    "renderDataCurve",
+    "renderCameraJourney",
+    "renderOdometerCounter",
+    "renderUIFeed3D",
+    "renderDossierDesk",
+    "renderNetworkGraph",
+    "renderVersusSplit",
+    "renderWaffleScale",
+    "renderKineticManifesto",
+    "MotionKit.PALETTES",
+    "resolvePalette(",
 )
 
 
-def _detect_motion_engine(raw_html: str) -> str:
-    m = re.search(
-        r"MotionKit\.(renderWorldAtlas|renderDataCurve|renderCameraJourney|renderOdometerCounter|renderUIFeed3D|renderDossierDesk|renderNetworkGraph|renderVersusSplit|renderWaffleScale|renderKineticManifesto)",
-        raw_html,
-    )
-    if m:
-        eng = m.group(1)
-        if eng == "renderWorldAtlas" and "orthographic" in raw_html:
-            return "renderWorldAtlas:orthographic"
-        return eng
-    return "custom_dom"
+def _normalize_motion_skeleton(raw_html: str) -> str:
+    """Strips comments, Google Font links, string literals, hex codes, and numbers to compare pure DOM/SVG/JS structure."""
+    s = re.sub(r"<!--.*?-->", "", raw_html, flags=re.DOTALL)
+    s = re.sub(r"//[^\n]*", "", s)
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.DOTALL)
+    s = re.sub(r"<link[^>]*>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"#[0-9a-fA-F]{3,8}\b", "#HEX", s)
+    s = re.sub(r"'[^'\n]{0,240}'", "'STR'", s)
+    s = re.sub(r'"[^"\n]{0,240}"', '"STR"', s)
+    s = re.sub(r"`[^`]{0,240}`", "`STR`", s)
+    s = re.sub(r"\b\d+(?:\.\d+)?\b", "0", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def audit_motion_scenes_v7(project_dir: str, errors: list, stats: dict):
@@ -75,14 +76,24 @@ def audit_motion_scenes_v7(project_dir: str, errors: list, stats: dict):
         return
 
     cutout_motions = 0
-    light_motions = 0
-    prev_engine = None
-    prev_file = None
+    skeletons: list[tuple[str, str]] = []
 
     for html_p in html_files:
         bname = os.path.basename(html_p)
         raw = open(html_p, "r", encoding="utf-8", errors="ignore").read()
         low = raw.lower()
+
+        if "__setframe" not in low:
+            errors.append(
+                f"Motion Frame Contract Failure in {bname}: missing deterministic `window.__setFrame(frameIdx, fps)`!"
+            )
+
+        for banned in BANNED_CANNED_WIDGETS:
+            if banned in raw:
+                errors.append(
+                    f"Banned Canned Motion Template in {bname}: `{banned}` is deprecated in v8.0! "
+                    "Write bespoke HTML/CSS/SVG/Canvas choreography tailored to the scene's metaphor."
+                )
 
         uses_real_gis = (
             "world-atlas.js" in low
@@ -97,35 +108,34 @@ def audit_motion_scenes_v7(project_dir: str, errors: list, stats: dict):
                 "Use `world-atlas.js` + `MotionKit.renderWorldAtlas(...)` or `maplibregl`."
             )
 
-        if "_cutout.png" in low or 'id="subject"' in low or "class=\"cutout" in low:
+        if "_cutout.png" in low or 'id="subject"' in low or 'class="cutout' in low:
             cutout_motions += 1
 
-        if any(tok in low for tok in LIGHT_PALETTE_MARKERS):
-            light_motions += 1
+        skeletons.append((bname, _normalize_motion_skeleton(raw)))
 
-        eng = _detect_motion_engine(raw)
-        if eng != "custom_dom" and eng == prev_engine:
-            errors.append(
-                f"Anti-Vício Consecutive Motion Clone: {prev_file} and {bname} both use `{eng}` back-to-back!"
-            )
-        prev_engine = eng
-        prev_file = bname
-
-    stats["motion_light_palettes"] = light_motions
     stats["motion_cutouts"] = cutout_motions
 
+    max_sim = 0.0
+    for i in range(len(skeletons)):
+        for j in range(i + 1, len(skeletons)):
+            name_a, sk_a = skeletons[i]
+            name_b, sk_b = skeletons[j]
+            sim = difflib.SequenceMatcher(None, sk_a, sk_b).ratio()
+            if sim > max_sim:
+                max_sim = sim
+            if sim > 0.84:
+                errors.append(
+                    f"Anti-Clone Motion Skeleton Failure: {name_a} and {name_b} share {sim * 100:.1f}% identical HTML/JS structure (max 84%)! "
+                    "Design distinct visual compositions for each motion scene."
+                )
+    stats["motion_max_pair_similarity"] = round(max_sim, 3)
+
     if len(html_files) >= 4:
-        max_cut = max(2, int(math.floor(len(html_files) * 0.25)))
+        max_cut = max(1, int(math.floor(len(html_files) * 0.25)))
         if cutout_motions > max_cut:
             errors.append(
                 f"Anti-Vício Motion Cutout Overuse: {cutout_motions}/{len(html_files)} motion scenes contain subject cutouts "
                 f"(max allowed={max_cut}, <=25% rule)."
-            )
-        min_light = int(math.ceil(len(html_files) * 0.40))
-        if light_motions < min_light:
-            errors.append(
-                f"Anti-Vício Dark Motion Monotony: only {light_motions}/{len(html_files)} motion scenes use light/warm/editorial palettes "
-                f"(need >={min_light}). Rotate `MotionKit.PALETTES`!"
             )
 
 

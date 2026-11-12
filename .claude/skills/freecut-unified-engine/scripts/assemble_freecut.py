@@ -914,85 +914,135 @@ def inspect_cutout_alpha(filepath: str) -> Tuple[bool, float, Tuple[int, int, in
         return False, 0.75, (200, 75, 49)
 
 
+def _ensure_contrast_accent(hex_col: str, on_light_bg: bool) -> str:
+    """Adjusts accent hex slightly if needed so kickers/highlights always stay legible on light or dark stages."""
+    r, g, b = hex_to_rgb(hex_col)
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    if on_light_bg and lum > 165:
+        r, g, b = int(r * 0.58), int(g * 0.52), int(b * 0.45)
+        return f"#{max(0, min(255, r)):02X}{max(0, min(255, g)):02X}{max(0, min(255, b)):02X}"
+    if (not on_light_bg) and lum < 85:
+        r = min(255, int(r + (255 - r) * 0.48))
+        g = min(255, int(g + (255 - g) * 0.48))
+        b = min(255, int(b + (255 - b) * 0.48))
+        return f"#{r:02X}{g:02X}{b:02X}"
+    return hex_col
+
+
 def generate_cutout_stage_backdrop(
     out_path: str,
     archetype: str,
     accent_rgb: Tuple[int, int, int],
     seed_str: str,
     subject_x_norm: float = 0.0,
+    theme: Optional[Dict[str, str]] = None,
+    scene_bg_hex: str = "",
 ) -> str:
     """
-    Renders bespoke art-directed 1920x1080/1080x1920 studio & paper backdrops for `parallax_cutout_stage`
-    (replaces ugly muddy gray blurred white-BG plates forever):
-      - `poster_monumental_center`: Deep botanical emerald-obsidian spotlight stage + subtle horizon pedestal.
-      - `archival_dossier_paper`  : Warm tactile cream archival newsprint + offset ochre/terracotta sun-disc stamp.
-      - `magazine_grounded_portrait`: Rich rose-obsidian magazine studio + diagonal key/rim light behind subject.
+    Renders bespoke `style_dna`-driven studio & paper backdrops for `parallax_cutout_stage` (v8.0):
+    every video inherits its own `paper_bg`, `studio_bg`, `accent`, and `accent_secondary`
+    instead of repeating fixed emerald/terracotta/plum backdrops across different videos.
     """
+    th = theme or {}
+    acc1 = hex_to_rgb(th.get("accent") or "#3B82F6")
+    acc2 = hex_to_rgb(th.get("accent_secondary") or "#FACC15")
+    paper_col = hex_to_rgb(scene_bg_hex if (scene_bg_hex and is_light_hex(scene_bg_hex)) else (th.get("paper_bg") or "#F4F1EA"))
+    studio_col = hex_to_rgb(scene_bg_hex if (scene_bg_hex and not is_light_hex(scene_bg_hex)) else (th.get("studio_bg") or "#10151E"))
+
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     yy, xx = np.mgrid[0:CANVAS_H, 0:CANVAS_W].astype(np.float32)
     nx = (xx - CANVAS_W * (0.5 + subject_x_norm * 0.42)) / (CANVAS_W * 0.5)
     ny = (yy - CANVAS_H * 0.48) / (CANVAS_H * 0.5)
     dist2 = nx * nx + ny * ny
-    rng = np.random.default_rng(abs(hash(seed_str)) % (2**32))
+    h_seed = abs(hash(seed_str))
+    rng = np.random.default_rng(h_seed % (2**32))
 
-    if archetype == "archival_dossier_paper":
+    if archetype == "archival_dossier_paper" or (scene_bg_hex and is_light_hex(scene_bg_hex)):
         base = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.float32)
-        base[:, :, 0], base[:, :, 1], base[:, :, 2] = 243.0, 239.0, 230.0
-        vig = np.clip(((xx - CANVAS_W * 0.5) / (CANVAS_W * 0.5)) ** 2 + ny * ny, 0.0, 2.2)[:, :, None] * 9.5
-        grain = rng.normal(0.0, 3.1, size=(CANVAS_H, CANVAS_W, 1)).astype(np.float32)
+        base[:, :, 0], base[:, :, 1], base[:, :, 2] = float(paper_col[0]), float(paper_col[1]), float(paper_col[2])
+        vig = np.clip(((xx - CANVAS_W * 0.5) / (CANVAS_W * 0.5)) ** 2 + ny * ny, 0.0, 2.2)[:, :, None] * 8.5
+        grain = rng.normal(0.0, 2.8, size=(CANVAS_H, CANVAS_W, 1)).astype(np.float32)
         arr = np.clip(base - vig + grain, 0, 255).astype(np.uint8)
         img = Image.fromarray(arr)
         draw = ImageDraw.Draw(img)
 
-        # Warm botanical disc & editorial registration lines behind the cutout column
         disc_cx = int(CANVAS_W * (0.5 + subject_x_norm))
-        disc_cy = int(CANVAS_H * 0.51)
-        disc_r = int(min(CANVAS_W, CANVAS_H) * 0.30)
-        draw.ellipse(
-            [disc_cx - disc_r, disc_cy - disc_r, disc_cx + disc_r, disc_cy + disc_r],
-            fill=(230, 216, 192),
-            outline=(200, 75, 49),
-            width=2,
+        disc_cy = int(CANVAS_H * 0.50)
+        disc_r = int(min(CANVAS_W, CANVAS_H) * 0.29)
+        soft_fill = (
+            int(paper_col[0] * 0.86 + acc2[0] * 0.14),
+            int(paper_col[1] * 0.86 + acc2[1] * 0.14),
+            int(paper_col[2] * 0.86 + acc2[2] * 0.14),
         )
-        outer_r = disc_r + 18
-        draw.ellipse(
-            [disc_cx - outer_r, disc_cy - outer_r, disc_cx + outer_r, disc_cy + outer_r],
-            outline=(212, 198, 175),
-            width=1,
+        rule_col = (
+            max(0, paper_col[0] - 28),
+            max(0, paper_col[1] - 28),
+            max(0, paper_col[2] - 26),
         )
+        motif = h_seed % 3
+        if motif == 0:
+            draw.ellipse(
+                [disc_cx - disc_r, disc_cy - disc_r, disc_cx + disc_r, disc_cy + disc_r],
+                fill=soft_fill,
+                outline=acc1,
+                width=3,
+            )
+        elif motif == 1:
+            band_w = int(CANVAS_W * 0.26)
+            draw.polygon(
+                [
+                    (disc_cx - band_w // 2, 0),
+                    (disc_cx + band_w // 2, 0),
+                    (disc_cx + band_w // 2 - 90, CANVAS_H),
+                    (disc_cx - band_w // 2 - 90, CANVAS_H),
+                ],
+                fill=soft_fill,
+            )
+        else:
+            pad_r = int(disc_r * 0.92)
+            draw.rounded_rectangle(
+                [disc_cx - pad_r, disc_cy - pad_r, disc_cx + pad_r, disc_cy + pad_r],
+                radius=28,
+                fill=soft_fill,
+                outline=rule_col,
+                width=2,
+            )
+
         margin_x = max(64, int(CANVAS_W * 0.05))
         margin_y = max(56, int(CANVAS_H * 0.075))
-        draw.line([(margin_x, margin_y), (CANVAS_W - margin_x, margin_y)], fill=(208, 198, 182), width=1)
-        draw.line([(margin_x, CANVAS_H - margin_y), (CANVAS_W - margin_x, CANVAS_H - margin_y)], fill=(208, 198, 182), width=1)
-        draw.rectangle([margin_x, margin_y + 18, margin_x + 5, CANVAS_H - margin_y - 18], fill=(200, 75, 49))
+        draw.line([(margin_x, margin_y), (CANVAS_W - margin_x, margin_y)], fill=rule_col, width=1)
+        draw.line([(margin_x, CANVAS_H - margin_y), (CANVAS_W - margin_x, CANVAS_H - margin_y)], fill=rule_col, width=1)
         img.save(out_path, "JPEG", quality=94, subsampling=0)
         return out_path
 
     if archetype == "magazine_grounded_portrait":
-        # Rich rose-noir / plum editorial studio with warm rim-light behind portrait
-        spot = np.exp(-dist2 * 1.55)[:, :, None]
+        spot = np.exp(-dist2 * 1.50)[:, :, None]
         ar, ag, ab = accent_rgb
-        glow_col = np.array([max(78.0, ar * 0.42), max(26.0, ag * 0.20), max(56.0, ab * 0.34)], dtype=np.float32)
-        dark_col = np.array([10.0, 8.0, 14.0], dtype=np.float32)
+        mix_r = ar * 0.45 + acc1[0] * 0.55
+        mix_g = ag * 0.45 + acc1[1] * 0.55
+        mix_b = ab * 0.45 + acc1[2] * 0.55
+        dark_col = np.array([studio_col[0] * 0.82, studio_col[1] * 0.82, studio_col[2] * 0.86], dtype=np.float32)
+        glow_col = np.array([mix_r * 0.36, mix_g * 0.36, mix_b * 0.36], dtype=np.float32)
         grain = rng.normal(0.0, 2.3, size=(CANVAS_H, CANVAS_W, 1)).astype(np.float32)
         arr = np.clip(dark_col[None, None, :] + spot * glow_col[None, None, :] + grain, 0, 255).astype(np.uint8)
         img = Image.fromarray(arr)
         draw = ImageDraw.Draw(img)
         mx = max(64, int(CANVAS_W * 0.05))
         my = max(56, int(CANVAS_H * 0.075))
-        draw.line([(mx, my), (CANVAS_W - mx, my)], fill=(58, 36, 52), width=1)
-        draw.line([(mx, CANVAS_H - my), (CANVAS_W - mx, CANVAS_H - my)], fill=(44, 28, 40), width=1)
-        # Subtle editorial vertical column divider
-        div_x = int(CANVAS_W * 0.51)
-        draw.line([(div_x, my + 24), (div_x, CANVAS_H - my - 24)], fill=(48, 30, 44), width=1)
+        line_c = (min(255, studio_col[0] + 28), min(255, studio_col[1] + 28), min(255, studio_col[2] + 34))
+        draw.line([(mx, my), (CANVAS_W - mx, my)], fill=line_c, width=1)
+        draw.line([(mx, CANVAS_H - my), (CANVAS_W - mx, CANVAS_H - my)], fill=line_c, width=1)
         img.save(out_path, "JPEG", quality=94, subsampling=0)
         return out_path
 
-    # Default (`poster_monumental_center`): Deep botanical emerald-obsidian spotlight + studio floor horizon
-    spot = np.exp(-dist2 * 1.65)[:, :, None]
-    dark_col = np.array([5.0, 11.0, 10.0], dtype=np.float32)
-    glow_col = np.array([14.0, 52.0, 42.0], dtype=np.float32)
-    floor_band = np.clip((yy - CANVAS_H * 0.76) / (CANVAS_H * 0.24), 0.0, 1.0)[:, :, None] * np.array([4.0, 10.0, 9.0])
+    # `poster_monumental_center`: Studio stage driven by `style_dna.studio_bg` + `accent` spotlight
+    spot = np.exp(-dist2 * 1.55)[:, :, None]
+    dark_col = np.array([float(studio_col[0]), float(studio_col[1]), float(studio_col[2])], dtype=np.float32)
+    glow_src = acc1 if (h_seed % 2 == 0) else acc2
+    glow_col = np.array([glow_src[0] * 0.30, glow_src[1] * 0.30, glow_src[2] * 0.30], dtype=np.float32)
+    floor_band = np.clip((yy - CANVAS_H * 0.76) / (CANVAS_H * 0.24), 0.0, 1.0)[:, :, None] * np.array(
+        [acc1[0] * 0.08, acc1[1] * 0.08, acc1[2] * 0.08], dtype=np.float32
+    )
     grain = rng.normal(0.0, 2.4, size=(CANVAS_H, CANVAS_W, 1)).astype(np.float32)
     arr = np.clip(dark_col[None, None, :] + spot * glow_col[None, None, :] + floor_band + grain, 0, 255).astype(np.uint8)
     img = Image.fromarray(arr)
@@ -1000,8 +1050,12 @@ def generate_cutout_stage_backdrop(
     mx = max(64, int(CANVAS_W * 0.05))
     my = max(56, int(CANVAS_H * 0.075))
     horizon_y = int(CANVAS_H * 0.80)
-    draw.line([(mx, horizon_y), (CANVAS_W - mx, horizon_y)], fill=(24, 58, 50), width=1)
-    draw.line([(mx, my), (CANVAS_W - mx, my)], fill=(22, 48, 42), width=1)
+    h_col = (
+        min(255, int(studio_col[0] * 0.7 + acc1[0] * 0.3)),
+        min(255, int(studio_col[1] * 0.7 + acc1[1] * 0.3)),
+        min(255, int(studio_col[2] * 0.7 + acc1[2] * 0.3)),
+    )
+    draw.line([(mx, horizon_y), (CANVAS_W - mx, horizon_y)], fill=h_col, width=1)
     img.save(out_path, "JPEG", quality=94, subsampling=0)
     return out_path
 
@@ -1096,11 +1150,23 @@ def _split_editorial_clauses(headline: str) -> Tuple[str, str]:
 def build_cutout_editorial_lockup(
     scene: Dict[str, Any],
     archetype: str,
+    theme: Optional[Dict[str, str]] = None,
+    on_light_bg: bool = False,
 ) -> Tuple[str, List[Dict[str, Any]], str, str, Optional[str]]:
     """
-    Returns `(plain_text, text_spans, primary_font, in_preset, monumental_bg_token)` tailored to each of the
-    3 distinct cutout archetypes so consecutive cutout scenes NEVER share font, layout, or visual hierarchy.
+    Returns `(plain_text, text_spans, primary_font, in_preset, monumental_bg_token)` driven by `style_dna` (v8.0):
+      - `monumental_bg_token` is ONLY emitted when `monumental_word` / `hero_word` is explicitly provided.
+      - Zero fake `"ARQUIVO DOCUMENTAL"` / `"REGISTRO LOCAL"` kickers when none was written.
+      - Fonts & accents adapt 100% to `theme` (`style_dna`).
     """
+    th = theme or {}
+    f_disp = th.get("font_display") or "Space Grotesk"
+    f_serif = th.get("font_serif") or f_disp
+    f_body = th.get("font_body") or "Plus Jakarta Sans"
+    f_mono = th.get("font_mono") or "JetBrains Mono"
+    acc1 = _ensure_contrast_accent(th.get("accent") or "#3B82F6", on_light_bg)
+    acc2 = _ensure_contrast_accent(th.get("accent_secondary") or "#FACC15", on_light_bg)
+
     raw_hl = (scene.get("headline") or scene.get("caption") or "").strip()
     hero_stat = (scene.get("hero_stat") or "").strip()
     explicit_kicker = (scene.get("kicker") or scene.get("eyebrow") or "").strip()
@@ -1109,109 +1175,82 @@ def build_cutout_editorial_lockup(
     primary_raw, secondary_raw = _split_editorial_clauses(raw_hl)
     title_clean = _smart_title_case(primary_raw or hero_stat or "Destaque")
 
-    # v7.0: Extract complete, untruncated monumental background token (NEVER `[:7]` chop or bare 1-2 digit fragments!)
-    bg_token = None
+    # v8.0: ONLY show giant monumental background word when explicitly requested in storyboard.json!
     explicit_mon = (scene.get("monumental_word") or scene.get("hero_word") or "").strip()
-    if explicit_mon:
-        bg_token = explicit_mon.upper()
-    else:
-        stat_source = f"{hero_stat} {raw_hl}".strip()
-        m_stat = re.search(
-            r"(?:R\$|US\$|\$)\s*\d[\d.,]*\s*(?:MI|BI|MIL|M|B|MILH[ÕO]ES|BILH[ÕO]ES)?|\b(?:19|20)\d{2}\b|\b\d+(?:[.,]\d+)?\s*(?:%|MI|BI|MILH[ÕO]ES|BILH[ÕO]ES)\b",
-            stat_source,
-            flags=re.IGNORECASE,
-        )
-        if m_stat:
-            tok = re.sub(r"MILH[ÕO]ES", "MI", m_stat.group(0).upper(), flags=re.IGNORECASE)
-            tok = re.sub(r"BILH[ÕO]ES", "BI", tok, flags=re.IGNORECASE)
-            bg_token = re.sub(r"\s+", " ", tok).strip()
-        elif title_clean:
-            stop_w = {
-                "COMO", "PARA", "QUANDO", "MAIS", "ENTRE", "SOBRE", "DEPOIS", "ANTES",
-                "UMA", "UM", "DOS", "DAS", "NOS", "NAS", "PELO", "PELA", "QUE", "POR",
-                "SEU", "SUA", "SEUS", "SUAS", "FOI", "ERA", "SÃO", "THE", "WITH", "FROM",
-            }
-            words_clean = [
-                re.sub(r"^[^\wÀ-ÿ]+|[^\wÀ-ÿ]+$", "", w).upper()
-                for w in title_clean.split()
-            ]
-            substantive = [w for w in words_clean if 4 <= len(w) <= 14 and w not in stop_w and not w.isdigit()]
-            if substantive:
-                bg_token = substantive[0]
-            elif words_clean and len(words_clean[0]) >= 3 and not words_clean[0].isdigit():
-                bg_token = words_clean[0][:14]
+    bg_token = explicit_mon.upper() if explicit_mon else None
 
     spans: List[Dict[str, Any]] = []
 
     if archetype == "poster_monumental_center":
         kicker_parts = [p for p in (explicit_kicker or hero_stat, secondary_raw) if p]
-        kicker = " • ".join(kicker_parts).upper() if kicker_parts else "ARQUIVO DOCUMENTAL"
+        if kicker_parts:
+            spans.append(
+                {
+                    "text": " • ".join(kicker_parts).upper() + "\n",
+                    "fontFamily": f_mono,
+                    "fontSize": 19,
+                    "fontWeight": "bold",
+                    "fontStyle": "normal",
+                    "color": acc2,
+                    "letterSpacing": 2.2,
+                }
+            )
         spans.append(
             {
-                "text": f"{kicker}\n",
-                "fontFamily": "Roboto Mono",
-                "fontSize": 19,
-                "fontWeight": "bold",
-                "fontStyle": "normal",
-                "color": "#FACC15",
-                "letterSpacing": 2.4,
-            }
-        )
-        spans.append(
-            {
-                "text": title_clean + (f"\n" if explicit_sub else ""),
-                "fontFamily": "Space Grotesk",
+                "text": title_clean + ("\n" if explicit_sub else ""),
+                "fontFamily": f_disp,
                 "fontSize": 58,
                 "fontWeight": "bold",
                 "fontStyle": "normal",
-                "color": "#F8FAFC",
-                "letterSpacing": -1.2,
+                "color": "#14181F" if on_light_bg else "#F8FAFC",
+                "letterSpacing": -1.1,
             }
         )
         if explicit_sub:
             spans.append(
                 {
                     "text": explicit_sub,
-                    "fontFamily": "DM Sans",
+                    "fontFamily": f_body,
                     "fontSize": 26,
                     "fontWeight": "medium",
                     "fontStyle": "normal",
-                    "color": "#CBD5E1",
+                    "color": "#475569" if on_light_bg else "#CBD5E1",
                     "letterSpacing": -0.2,
                 }
             )
         plain = "".join(s["text"] for s in spans)
-        return plain, spans, "Space Grotesk", "typewriter", bg_token
+        return plain, spans, f_disp, "rise", bg_token
 
-    if archetype == "archival_dossier_paper":
-        kicker = (explicit_kicker or secondary_raw or hero_stat or "REGISTRO LOCAL").upper()
+    if archetype == "archival_dossier_paper" or on_light_bg:
+        kicker = (explicit_kicker or secondary_raw or hero_stat).strip()
+        if kicker:
+            spans.append(
+                {
+                    "text": f"{kicker.upper()}\n",
+                    "fontFamily": f_mono,
+                    "fontSize": 19,
+                    "fontWeight": "bold",
+                    "fontStyle": "normal",
+                    "color": acc1,
+                    "letterSpacing": 2.0,
+                }
+            )
         spans.append(
             {
-                "text": f"{kicker}\n",
-                "fontFamily": "Roboto Mono",
-                "fontSize": 20,
+                "text": title_clean + ("\n" if explicit_sub else ""),
+                "fontFamily": f_serif,
+                "fontSize": 74,
                 "fontWeight": "bold",
-                "fontStyle": "normal",
-                "color": "#C84B31",
-                "letterSpacing": 2.0,
-            }
-        )
-        spans.append(
-            {
-                "text": title_clean + (f"\n" if explicit_sub else ""),
-                "fontFamily": "Playfair Display",
-                "fontSize": 80,
-                "fontWeight": "bold",
-                "fontStyle": "italic",
+                "fontStyle": "italic" if "Playfair" in f_serif or "Instrument" in f_serif or "Lora" in f_serif else "normal",
                 "color": "#14181F",
-                "letterSpacing": -1.4,
+                "letterSpacing": -1.3,
             }
         )
         if explicit_sub:
             spans.append(
                 {
                     "text": explicit_sub,
-                    "fontFamily": "DM Sans",
+                    "fontFamily": f_body,
                     "fontSize": 28,
                     "fontWeight": "medium",
                     "fontStyle": "normal",
@@ -1220,66 +1259,79 @@ def build_cutout_editorial_lockup(
                 }
             )
         plain = "".join(s["text"] for s in spans)
-        return plain, spans, "Playfair Display", "cascade", None
+        return plain, spans, f_serif, "cascade", None
 
     # `magazine_grounded_portrait`
-    kicker = (explicit_kicker or hero_stat or "PERFIL EDITORIAL").upper()
+    kicker = (explicit_kicker or hero_stat).strip()
     sub_line = explicit_sub or secondary_raw
-    spans.append(
-        {
-            "text": f"{kicker}\n",
-            "fontFamily": "Roboto Mono",
-            "fontSize": 19,
-            "fontWeight": "bold",
-            "fontStyle": "normal",
-            "color": "#F472B6",
-            "letterSpacing": 2.4,
-        }
-    )
+    if kicker:
+        spans.append(
+            {
+                "text": f"{kicker.upper()}\n",
+                "fontFamily": f_mono,
+                "fontSize": 19,
+                "fontWeight": "bold",
+                "fontStyle": "normal",
+                "color": acc1,
+                "letterSpacing": 2.2,
+            }
+        )
     spans.append(
         {
             "text": title_clean + ("\n" if sub_line else ""),
-            "fontFamily": "Bricolage Grotesque",
-            "fontSize": 68,
+            "fontFamily": f_disp,
+            "fontSize": 66,
             "fontWeight": "bold",
             "fontStyle": "normal",
             "color": "#FFFFFF",
-            "letterSpacing": -1.5,
+            "letterSpacing": -1.4,
         }
     )
     if sub_line:
         spans.append(
             {
                 "text": _smart_title_case(sub_line),
-                "fontFamily": "Playfair Display",
-                "fontSize": 38,
+                "fontFamily": f_serif,
+                "fontSize": 36,
                 "fontWeight": "normal",
-                "fontStyle": "italic",
+                "fontStyle": "italic" if "Playfair" in f_serif or "Instrument" in f_serif or "Lora" in f_serif else "normal",
                 "color": "#E2E8F0",
                 "letterSpacing": -0.4,
             }
         )
     plain = "".join(s["text"] for s in spans)
-    return plain, spans, "Bricolage Grotesque", "slide-mask", None
+    return plain, spans, f_disp, "slide-mask", None
 
 
-def build_callout_spans(raw_text: str, scene_idx: int) -> Tuple[str, List[Dict[str, Any]], str, str]:
-    """Formats full-bleed / B-roll lower-thirds & callouts with varied editorial fonts + eyebrow/stat highlights."""
+def build_callout_spans(
+    raw_text: str,
+    scene_idx: int,
+    theme: Optional[Dict[str, str]] = None,
+    on_light_bg: bool = False,
+) -> Tuple[str, List[Dict[str, Any]], str, str]:
+    """Formats full-bleed / B-roll / split lower-thirds & callouts using the project's `style_dna` fonts & accents."""
+    th = theme or {}
+    f_disp = th.get("font_display") or "Space Grotesk"
+    f_serif = th.get("font_serif") or f_disp
+    f_body = th.get("font_body") or "Plus Jakarta Sans"
+    f_mono = th.get("font_mono") or "JetBrains Mono"
+    acc1 = _ensure_contrast_accent(th.get("accent") or "#3B82F6", on_light_bg)
+    acc2 = _ensure_contrast_accent(th.get("accent_secondary") or "#FACC15", on_light_bg)
+    main_col = "#14181F" if on_light_bg else "#FFFFFF"
+
     txt = (raw_text or "").strip()
     primary_raw, secondary_raw = _split_editorial_clauses(txt)
     callout_presets = ["slide-mask", "fade-up", "rise", "blur-in"]
     chosen_in = callout_presets[scene_idx % len(callout_presets)]
 
-    # Case 1: Explicit location/context separator (`KIGALI, RUANDA — ÁFRICA ORIENTAL`)
     if secondary_raw:
-        accents = ["#FACC15", "#34D399", "#F59E0B", "#38BDF8"]
-        acc = accents[scene_idx % len(accents)]
-        head_fonts = ["Space Grotesk", "Bricolage Grotesque", "Playfair Display"]
+        acc = acc1 if (scene_idx % 2 == 0) else acc2
+        head_fonts = [f_disp, f_body, f_serif]
         hf = head_fonts[scene_idx % len(head_fonts)]
         spans = [
             {
                 "text": f"{secondary_raw.upper()}\n",
-                "fontFamily": "Roboto Mono",
+                "fontFamily": f_mono,
                 "fontSize": 18,
                 "fontWeight": "bold",
                 "fontStyle": "normal",
@@ -1291,14 +1343,13 @@ def build_callout_spans(raw_text: str, scene_idx: int) -> Tuple[str, List[Dict[s
                 "fontFamily": hf,
                 "fontSize": 42,
                 "fontWeight": "bold",
-                "fontStyle": "italic" if hf == "Playfair Display" else "normal",
-                "color": "#FFFFFF",
+                "fontStyle": "italic" if ("Playfair" in hf or "Instrument" in hf) else "normal",
+                "color": main_col,
                 "letterSpacing": -0.8,
             },
         ]
         return "".join(s["text"] for s in spans), spans, hf, chosen_in
 
-    # Case 2: Headline starts with or contains a monetary/numeric stat (`R$ 1,3 BILHÃO EM FATURAMENTO...`)
     m_stat = re.match(r"^((?:R\$|US\$|\$)?\s*\d[\d.,]*(?:\s*(?:BILH[ÕO]ES|BILH[ÃA]O|MILH[ÕO]ES|MIL|%|KM))?)\s+(.+)$", txt, flags=re.IGNORECASE)
     if m_stat:
         stat_tok = m_stat.group(1).strip().upper()
@@ -1306,78 +1357,84 @@ def build_callout_spans(raw_text: str, scene_idx: int) -> Tuple[str, List[Dict[s
         spans = [
             {
                 "text": f"{stat_tok}\n",
-                "fontFamily": "Oswald",
+                "fontFamily": f_disp,
                 "fontSize": 52,
                 "fontWeight": "bold",
                 "fontStyle": "normal",
-                "color": "#FACC15",
-                "letterSpacing": 0.4,
+                "color": acc2,
+                "letterSpacing": 0.2,
             },
             {
                 "text": rest_tok,
-                "fontFamily": "Inter Tight",
+                "fontFamily": f_body,
                 "fontSize": 32,
                 "fontWeight": "semibold",
                 "fontStyle": "normal",
-                "color": "#F8FAFC",
+                "color": main_col,
                 "letterSpacing": -0.4,
             },
         ]
-        return "".join(s["text"] for s in spans), spans, "Oswald", "pop"
+        return "".join(s["text"] for s in spans), spans, f_disp, "pop"
 
-    # Case 3: Closing thesis / editorial sentence -> Playfair Display italic or Inter Tight
     is_thesis = txt.endswith(".") and len(txt.split()) >= 6
-    fam = "Playfair Display" if is_thesis else "Inter Tight"
-    clean = _smart_title_case(txt) if not is_thesis else (txt[:1].upper() + txt[1:].lower())
+    fam = f_serif if is_thesis else f_disp
+    clean = _smart_title_case(txt) if not is_thesis else (txt[:1].upper() + txt[1:])
     spans = [
         {
             "text": clean,
             "fontFamily": fam,
             "fontSize": 42 if is_thesis else 38,
             "fontWeight": "bold",
-            "fontStyle": "italic" if is_thesis else "normal",
-            "color": "#FFFFFF",
+            "fontStyle": "italic" if (is_thesis and ("Playfair" in fam or "Instrument" in fam)) else "normal",
+            "color": main_col,
             "letterSpacing": -0.6,
         }
     ]
     return clean, spans, fam, ("blur-in" if is_thesis else chosen_in)
 
 
-def build_statement_spans(raw_text: str, on_light_bg: bool) -> Tuple[str, List[Dict[str, Any]], str]:
-    """Splits punchy kinetic statements into a contrast setup + climax serif/display punch word."""
+def build_statement_spans(
+    raw_text: str,
+    on_light_bg: bool,
+    theme: Optional[Dict[str, str]] = None,
+) -> Tuple[str, List[Dict[str, Any]], str]:
+    """Splits punchy kinetic statements into a contrast setup + climax display punch word using `style_dna`."""
+    th = theme or {}
+    f_disp = th.get("font_display") or "Space Grotesk"
+    f_serif = th.get("font_serif") or f_disp
     txt = (raw_text or "").strip()
     words = txt.split()
     main_col = "#14181F" if on_light_bg else "#F8FAFC"
     muted_col = "#475569" if on_light_bg else "#94A3B8"
-    accent_col = "#C84B31" if on_light_bg else "#FACC15"
+    accent_col = _ensure_contrast_accent(th.get("accent") if on_light_bg else (th.get("accent_secondary") or th.get("accent") or "#FACC15"), on_light_bg)
     if len(words) >= 3:
         setup = " ".join(words[:-1]).upper()
         punch = words[-1].upper()
         spans = [
             {
                 "text": f"{setup}\n",
-                "fontFamily": "Space Grotesk",
-                "fontSize": 42,
+                "fontFamily": f_disp,
+                "fontSize": 40,
                 "fontWeight": "semibold",
                 "fontStyle": "normal",
                 "color": muted_col,
-                "letterSpacing": 2.2,
+                "letterSpacing": 2.0,
             },
             {
                 "text": punch,
-                "fontFamily": "Playfair Display",
-                "fontSize": 88,
+                "fontFamily": f_serif,
+                "fontSize": 86,
                 "fontWeight": "bold",
-                "fontStyle": "italic",
+                "fontStyle": "italic" if ("Playfair" in f_serif or "Instrument" in f_serif) else "normal",
                 "color": accent_col if len(punch) <= 12 else main_col,
-                "letterSpacing": -1.5,
+                "letterSpacing": -1.4,
             },
         ]
-        return "".join(s["text"] for s in spans), spans, "Playfair Display"
+        return "".join(s["text"] for s in spans), spans, f_serif
     spans = [
         {
             "text": txt,
-            "fontFamily": "Oswald",
+            "fontFamily": f_disp,
             "fontSize": 72,
             "fontWeight": "bold",
             "fontStyle": "normal",
@@ -1385,7 +1442,7 @@ def build_statement_spans(raw_text: str, on_light_bg: bool) -> Tuple[str, List[D
             "letterSpacing": -0.8,
         }
     ]
-    return txt, spans, "Oswald"
+    return txt, spans, f_disp
 
 
 def pick_bundled_sfx(seed_str: str, gentle: bool = True, layout: str = "") -> Optional[Tuple[str, float]]:
@@ -1966,12 +2023,26 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
     safe_title = "".join(c if (c.isalnum() or c in "_- ") else "" for c in title).strip().replace(" ", "_")[:48] or "FreeCut_Doc"
     project_id = det_uid(f"freecut_v6_{safe_title}_{CANVAS_W}x{CANVAS_H}")
 
-    style_dna = storyboard.get("style_dna", {})
-    font_display = style_dna.get("font_display", "Montserrat")
-    font_body = style_dna.get("font_body", "Inter")
-    accent_hex = style_dna.get("accent", "#C84B31")
-    paper_hex = style_dna.get("paper_bg", "#F4F1EA")
-    studio_hex = style_dna.get("studio_bg", "#10151E")
+    style_dna = storyboard.get("style_dna") or {}
+    font_display = style_dna.get("font_display") or "Space Grotesk"
+    font_serif = style_dna.get("font_serif") or style_dna.get("font_contrast") or "Playfair Display"
+    font_body = style_dna.get("font_body") or "Plus Jakarta Sans"
+    font_mono = style_dna.get("font_mono") or "JetBrains Mono"
+    accent_hex = style_dna.get("accent") or "#3B82F6"
+    accent_sec_hex = style_dna.get("accent_secondary") or style_dna.get("accent_alt") or "#FACC15"
+    paper_hex = style_dna.get("paper_bg") or "#F4F1EA"
+    studio_hex = style_dna.get("studio_bg") or "#10151E"
+    theme = {
+        "font_display": font_display,
+        "font_serif": font_serif,
+        "font_body": font_body,
+        "font_mono": font_mono,
+        "accent": accent_hex,
+        "accent_secondary": accent_sec_hex,
+        "paper_bg": paper_hex,
+        "studio_bg": studio_hex,
+    }
+    theme_hash = hashlib.md5(json.dumps(theme, sort_keys=True).encode("utf-8")).hexdigest()[:6]
 
     narration_path = find_narration_file(project_dir, storyboard)
     narration_meta = probe_media(narration_path)
@@ -2197,7 +2268,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 }
             )
             stmt_raw = scene.get("headline") or scene.get("caption") or scene.get("narration", "")
-            stmt_plain, stmt_spans, stmt_font = build_statement_spans(stmt_raw, on_light_canvas)
+            stmt_plain, stmt_spans, stmt_font = build_statement_spans(stmt_raw, on_light_canvas, theme=theme)
             append_native_text_item(
                 items=items,
                 all_keyframes=all_keyframes,
@@ -2696,7 +2767,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
 
             if has_bottom_caption:
                 cap_raw = scene.get("headline") or scene.get("caption")
-                c_plain, c_spans, c_font, c_in = build_callout_spans(cap_raw, idx)
+                c_plain, c_spans, c_font, c_in = build_callout_spans(cap_raw, idx, theme=theme, on_light_bg=False)
                 append_native_text_item(
                     items=items,
                     all_keyframes=all_keyframes,
@@ -2835,7 +2906,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
             has_custom_entrance = True
 
             split_txt = scene.get("headline") or scene.get("caption") or scene.get("narration", "")
-            s_plain, s_spans, s_font, s_in = build_callout_spans(split_txt, idx)
+            s_plain, s_spans, s_font, s_in = build_callout_spans(split_txt, idx, theme=theme, on_light_bg=on_light_canvas)
             append_native_text_item(
                 items=items,
                 all_keyframes=all_keyframes,
@@ -2874,8 +2945,10 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 archetype = valid_archetypes[cutout_free_counter % 2]
                 cutout_free_counter += 1
 
-            on_light_canvas = (archetype == "archival_dossier_paper")
-            st_plain, st_spans, st_font, st_in, bg_token = build_cutout_editorial_lockup(scene, archetype)
+            on_light_canvas = (archetype == "archival_dossier_paper") or (bool(scene_bg_hex) and is_light_hex(scene_bg_hex))
+            st_plain, st_spans, st_font, st_in, bg_token = build_cutout_editorial_lockup(
+                scene, archetype, theme=theme, on_light_bg=on_light_canvas
+            )
 
             # Subject horizontal placement normalized in [-0.5, +0.5]: alternate Center (0.0), Right (+0.21), Left (-0.21)!
             explicit_side = str(scene.get("subject_side") or "").strip().lower()
@@ -2889,8 +2962,16 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 subj_x_norm = 0.21 if (cutout_side_toggle % 2 == 0) else -0.21
                 cutout_side_toggle += 1
 
-            stage_plate_path = os.path.join(project_dir, "media", "backdrops", f"{sid}_{archetype}_v70.jpg")
-            generate_cutout_stage_backdrop(stage_plate_path, archetype, accent_rgb, f"{sid}_{archetype}", subject_x_norm=subj_x_norm)
+            stage_plate_path = os.path.join(project_dir, "media", "backdrops", f"{sid}_{archetype}_{theme_hash}.jpg")
+            generate_cutout_stage_backdrop(
+                stage_plate_path,
+                archetype,
+                accent_rgb,
+                f"{sid}_{archetype}_{theme_hash}",
+                subject_x_norm=subj_x_norm,
+                theme=theme,
+                scene_bg_hex=scene_bg_hex,
+            )
             bg_mid, bg_meta = register_media(stage_plate_path)
 
             # In `poster_monumental_center`, backdrop goes on `track_bg` so giant monumental display type sits on `track_anchor` BEHIND `track_fg_2`!
@@ -2952,8 +3033,8 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 n_glyphs = max(4, len(mon_txt))
                 auto_mon_fs = max(132, min(215 if is_vertical else 310, int(mon_box_w / (n_glyphs * 0.66))))
                 auto_mon_ls = 10.0 if n_glyphs <= 5 else (5.0 if n_glyphs <= 8 else 2.0)
-                mon_tints = ["#6EE7B7", "#FDE68A", "#93C5FD", "#F9A8D4"]
-                mon_col = mon_tints[idx % len(mon_tints)]
+                mon_tints = [accent_sec_hex, accent_hex]
+                mon_col = _ensure_contrast_accent(mon_tints[idx % len(mon_tints)], on_light_canvas)
                 mon_x = 0
                 mon_y = int(CANVAS_H * (0.02 if is_vertical else -0.10))
                 append_native_text_item(
@@ -2969,7 +3050,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                     width=mon_box_w,
                     height=420,
                     font_size=auto_mon_fs,
-                    font_family="Bebas Neue",
+                    font_family=font_display,
                     font_weight="bold",
                     color=mon_col,
                     text_align="center",
@@ -3252,7 +3333,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
 
             if is_pull_quote:
                 pq_raw = scene.get("headline") or scene.get("caption") or "Registro de Imprensa"
-                pq_plain, pq_spans, pq_font, pq_in = build_callout_spans(pq_raw, idx)
+                pq_plain, pq_spans, pq_font, pq_in = build_callout_spans(pq_raw, idx, theme=theme, on_light_bg=False)
                 append_native_text_item(
                     items=items,
                     all_keyframes=all_keyframes,
@@ -3302,7 +3383,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 elif ev_variant == "dossier_focus_brackets":
                     auto_lot = os.path.join(project_dir, "lottie", f"{sid}_focus_brackets.json")
                     subprocess.run(
-                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "focus_corner_brackets", "--accent", "#E11D48", "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
+                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "focus_corner_brackets", "--accent", accent_hex, "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
                         stdin=subprocess.DEVNULL,
                         capture_output=True,
                     )
@@ -3319,7 +3400,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 elif ev_variant == "headline_underline_ink":
                     auto_lot = os.path.join(project_dir, "lottie", f"{sid}_ink_underline.json")
                     subprocess.run(
-                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "handdrawn_underline", "--accent", "#EF4444", "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
+                        [sys.executable, "-B", LOTTIE_GEN_SCRIPT, "--kind", "handdrawn_underline", "--accent", accent_hex, "--duration", str(round(dur_ms / 1000.0, 2)), "--out", auto_lot],
                         stdin=subprocess.DEVNULL,
                         capture_output=True,
                     )
@@ -3509,7 +3590,7 @@ def assemble_project(project_dir: str, force_captions: bool = False) -> Tuple[st
                 consecutive_text_scenes = 0
             else:
                 consecutive_text_scenes += 1
-                c_plain, c_spans, c_font, c_in = build_callout_spans(call_raw, idx)
+                c_plain, c_spans, c_font, c_in = build_callout_spans(call_raw, idx, theme=theme, on_light_bg=False)
                 subj_xy = _detect_visual_saliency_center(media_path, project_dir, sid)
                 explicit_pos = scene.get("text_position") if "text_position" in scene else None
                 chosen_zone, tx, ty, tw, talign = _pick_callout_zone_v7(

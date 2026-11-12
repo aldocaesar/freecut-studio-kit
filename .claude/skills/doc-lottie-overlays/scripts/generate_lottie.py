@@ -560,11 +560,79 @@ def _build_preset_json(kind: str, dur_frames: int, accent: str, bg: str) -> dict
         return make_marker_highlight(dur_frames=dur_frames, accent=accent)
     if kind == "pointer_arrow":
         return make_pointer_arrow(dur_frames=dur_frames, accent=accent)
+    if kind == "spark_burst":
+        return make_spark_burst(dur_frames=dur_frames, accent=accent)
     return make_pulse_beacon(dur_frames=dur_frames, accent=accent)
+
+
+def make_spark_burst(w=320, h=320, dur_frames=75, accent="#FFD60A"):
+    """Radial 8-ray comic/pop starburst accent for upbeat, entertainment, creator, or milestone moments."""
+    import math as _m
+
+    col = hex_to_rgb01(accent)
+    ray_shapes = []
+    for i in range(8):
+        ang = i * (_m.pi / 4.0)
+        r0, r1 = 42.0, (112.0 if i % 2 == 0 else 86.0)
+        p = {
+            "c": False,
+            "v": [[round(_m.cos(ang) * r0, 2), round(_m.sin(ang) * r0, 2)], [round(_m.cos(ang) * r1, 2), round(_m.sin(ang) * r1, 2)]],
+            "i": [[0, 0], [0, 0]],
+            "o": [[0, 0], [0, 0]],
+        }
+        ray_shapes.append({"ind": i, "ty": "sh", "ks": {"a": 0, "k": p}, "nm": f"Ray{i}"})
+    ray_shapes.extend(
+        [
+            {
+                "ty": "tm",
+                "s": {"a": 1, "k": [{"t": 0, "s": [0]}, {"t": 10, "s": [0]}, {"t": 28, "s": [100]}]},
+                "e": {"a": 1, "k": [{"t": 0, "s": [0]}, {"t": 14, "s": [100]}, {"t": 28, "s": [100]}]},
+                "o": {"a": 0, "k": 0},
+                "m": 1,
+            },
+            {"ty": "st", "c": {"a": 0, "k": col}, "o": {"a": 0, "k": 100}, "w": {"a": 0, "k": 8}, "lc": 2, "lj": 2},
+            {"ty": "tr", "p": {"a": 0, "k": [0, 0]}, "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}, "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}},
+        ]
+    )
+    return {
+        "v": "5.7.4",
+        "fr": 30,
+        "ip": 0,
+        "op": dur_frames,
+        "w": w,
+        "h": h,
+        "nm": "spark_burst",
+        "ddd": 0,
+        "assets": [],
+        "layers": [
+            {
+                "ddd": 0,
+                "ind": 1,
+                "ty": 4,
+                "nm": "StarBurst",
+                "sr": 1,
+                "ks": {
+                    "o": {"a": 1, "k": [{"t": 0, "s": [0]}, {"t": 3, "s": [100]}, {"t": 26, "s": [100]}, {"t": 34, "s": [0]}]},
+                    "r": {"a": 1, "k": [{"t": 0, "s": [-18]}, {"t": 32, "s": [14]}]},
+                    "p": {"a": 0, "k": [w / 2, h / 2, 0]},
+                    "a": {"a": 0, "k": [0, 0, 0]},
+                    "s": {"a": 1, "k": [{"t": 0, "s": [65, 65, 100]}, {"t": 16, "s": [106, 106, 100]}, {"t": 32, "s": [115, 115, 100]}]},
+                },
+                "ao": 0,
+                "shapes": [{"ty": "gr", "nm": "Rays", "it": ray_shapes}],
+                "ip": 0,
+                "op": dur_frames,
+                "st": 0,
+                "bm": 0,
+            }
+        ],
+    }
 
 
 def _infer_kind_from_path(file_path: str, layout: str = "") -> str:
     low = os.path.basename(file_path).lower()
+    if "spark" in low or "burst" in low or "pop" in low:
+        return "spark_burst"
     if "marker" in low or "highlight" in low:
         return "marker_highlight"
     if "arrow" in low or "pointer" in low:
@@ -596,12 +664,14 @@ def main():
             "pulse_beacon",
             "marker_highlight",
             "pointer_arrow",
+            "spark_burst",
         ],
     )
     ap.add_argument("--out", required=False)
     ap.add_argument("--duration", type=float, default=3.5)
-    ap.add_argument("--accent", default="#C84B31")
-    ap.add_argument("--bg", default="#0D121A")
+    ap.add_argument("--accent", default="#3B82F6")
+    ap.add_argument("--bg", default="#10151E")
+    ap.add_argument("--force", action="store_true", help="Regenerate existing Lottie JSON files")
     args = ap.parse_args()
 
     if args.project_dir:
@@ -611,21 +681,23 @@ def main():
         sb = json.load(open(sb_path, "r", encoding="utf-8"))
         dna = sb.get("style_dna") or {}
         def_accent = dna.get("accent") or args.accent
+        sec_accent = dna.get("accent_secondary") or def_accent
         def_bg = dna.get("studio_bg") or args.bg
         fps = int(sb.get("fps") or 30)
         built = 0
-        for sc in sb.get("scenes", []):
+        for idx, sc in enumerate(sb.get("scenes", [])):
             ov = sc.get("lottie_overlay")
             if not isinstance(ov, dict) or not ov.get("file"):
                 continue
             rel_f = ov["file"]
             out_p = rel_f if os.path.isabs(rel_f) else os.path.join(args.project_dir, rel_f)
-            if os.path.isfile(out_p) and os.path.getsize(out_p) > 50 and not ov.get("overwrite"):
+            if os.path.isfile(out_p) and os.path.getsize(out_p) > 50 and not (ov.get("overwrite") or args.force):
                 continue
             dur_s = float(ov.get("duration") or max(2.2, (sc.get("end_ms", 3500) - sc.get("start_ms", 0)) / 1000.0 - 0.3))
             frames = max(24, int(round(dur_s * fps)))
             kind = ov.get("kind") or _infer_kind_from_path(out_p, str(sc.get("layout", "")))
-            accent = ov.get("accent") or ("#FACC15" if kind == "marker_highlight" else def_accent)
+            auto_acc = sec_accent if (kind == "spark_burst" or idx % 2 == 1) else def_accent
+            accent = ov.get("accent") or ("#FACC15" if kind == "marker_highlight" else auto_acc)
             data = _build_preset_json(kind, frames, accent, def_bg)
             os.makedirs(os.path.dirname(os.path.abspath(out_p)), exist_ok=True)
             with open(out_p, "w", encoding="utf-8") as f:

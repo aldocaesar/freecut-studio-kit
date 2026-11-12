@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-creator_memory.py — Persistent Channel & Editing Style Memory for FreeCut (v7.2)
-================================================================================
-Stores durable per-workspace preferences, channel context, recurring entities,
-and a rolling summary of recent projects in `<WORKSPACE>/.freecut-creator-memory.json`
+creator_memory.py — Persistent Channel & Anti-Clone Style Memory for FreeCut (v8.0)
+===================================================================================
+Stores durable per-workspace creator rules, recurring entities, and a rolling
+anti-repetition log of recent projects in `<WORKSPACE>/.freecut-creator-memory.json`
 (gitignored & excluded from shareable bundles).
 
-Allows BOTH OpenBot (`Editor-FreeCut`) and standalone GitHub CLI agents
-(Claude Code, Antigravity, Cursor, Codex) to:
-  1. Detect & recall the creator's preferred format, niche, tone, and feedback
-     rules before planning `storyboard.json` (`--summary`), even when the user
-     drops ONLY a bare `.mp3`/`.wav` audio file!
-  2. Save new feedback/preferences in 1 command (`--remember "..."`).
-  3. Automatically record each finished edit (`--record-project <dir>`) so
-     back-to-back videos stay faithful to the channel's DNA while avoiding
-     repetitive opening layouts or identical color palettes.
+Key v8.0 Guarantees:
+  1. NEVER auto-locks a single video's `style_dna.accent` as permanent channel accent
+     (only explicit `--accent` from user brand feedback locks `profile.accent_color`).
+  2. Tracks recent videos' `style_dna` (colors, fonts, mood), `opening_layout`, and
+     `motion_briefs` so the next video intentionally picks a fresh, genre-authentic
+     visual identity and never clones palettes or motion scenes back-to-back.
 """
 import argparse
 import datetime
@@ -32,7 +29,7 @@ MEMORY_FILENAME = ".freecut-creator-memory.json"
 
 def _default_state() -> dict:
     return {
-        "version": "7.2",
+        "version": "8.0",
         "updated_at": "",
         "profile": {
             "default_aspect_ratio": "16:9",
@@ -75,7 +72,7 @@ def load_memory(ws_root: str = "") -> dict:
 
 def save_memory(data: dict, ws_root: str = "") -> str:
     p = memory_path(ws_root)
-    data["version"] = "7.2"
+    data["version"] = "8.0"
     data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8", newline="\n") as fh:
@@ -96,19 +93,17 @@ def record_project(project_dir: str, ws_root: str = "") -> str:
     mem = load_memory(ws_root)
     scenes = sb.get("scenes") or []
     dur_ms = max((int(s.get("end_ms") or 0) for s in scenes), default=0)
-    palettes = []
-    engines = []
+    motion_briefs = []
     for s in scenes:
-        mp = str(s.get("motion_palette") or "").strip()
-        mf = str(s.get("motion_family") or "").strip()
-        if mp and mp not in palettes:
-            palettes.append(mp)
-        if mf and mf not in engines:
-            engines.append(mf)
+        if str(s.get("layout") or "").lower() in ("motion_scene", "motion") or str(s.get("media_type") or "").upper() == "MOTION_SCENE":
+            mb = str(s.get("motion_brief") or s.get("headline") or s.get("id") or "").strip()
+            if mb:
+                motion_briefs.append(mb[:72])
 
     slug = os.path.basename(os.path.abspath(project_dir))
     aspect = str(sb.get("aspect_ratio") or mem["profile"].get("default_aspect_ratio") or "16:9")
     dna = sb.get("style_dna") or {}
+    fonts = [f for f in (dna.get("font_display"), dna.get("font_serif"), dna.get("font_body")) if f]
     entry = {
         "slug": slug,
         "title": str(sb.get("title") or slug)[:80],
@@ -116,17 +111,19 @@ def record_project(project_dir: str, ws_root: str = "") -> str:
         "duration_s": round(dur_ms / 1000.0, 1),
         "scenes": len(scenes),
         "opening_layout": str(scenes[0].get("layout") if scenes else ""),
+        "mood": str(dna.get("mood") or dna.get("genre") or ""),
         "accent": str(dna.get("accent") or ""),
-        "motion_palettes": palettes[:4],
-        "motion_engines": engines[:4],
+        "accent_secondary": str(dna.get("accent_secondary") or ""),
+        "studio_bg": str(dna.get("studio_bg") or ""),
+        "paper_bg": str(dna.get("paper_bg") or ""),
+        "fonts": fonts[:3],
+        "motion_briefs": motion_briefs[:5],
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"),
     }
 
     recent = [r for r in mem.get("recent_projects", []) if r.get("slug") != slug]
     recent.insert(0, entry)
     mem["recent_projects"] = recent[:8]
-    if not mem["profile"].get("accent_color") and entry["accent"]:
-        mem["profile"]["accent_color"] = entry["accent"]
     return save_memory(mem, ws_root)
 
 
@@ -136,7 +133,7 @@ def format_summary(ws_root: str = "") -> str:
     if not os.path.isfile(p):
         return (
             f"[CREATOR MEMORY] Clean slate (onboarding={'DONE' if setup_done else 'FIRST_RUN'}) | "
-            "defaults: aspect=16:9, captions=off, pace=3.2s-5.8s, >=50% light/colored motion palettes."
+            "defaults: aspect=16:9, captions=off, bespoke genre-driven style_dna & 100% custom LLM motion scenes."
         )
     mem = load_memory(ws_root)
     prof = mem["profile"]
@@ -146,7 +143,7 @@ def format_summary(ws_root: str = "") -> str:
         f"lang={prof.get('language', 'auto')} | "
         f"captions={'on' if prof.get('captions_default') else 'off'}"
         + (f" | niche={prof['niche']}" if prof.get("niche") else "")
-        + (f" | accent={prof['accent_color']}" if prof.get("accent_color") else "")
+        + (f" | locked_brand_accent={prof['accent_color']}" if prof.get("accent_color") else " | palette=chameleon_per_video")
     ]
     if mem.get("style_rules"):
         lines.append("  Durable Creator Rules:")
@@ -158,8 +155,12 @@ def format_summary(ws_root: str = "") -> str:
         last = mem["recent_projects"][0]
         lines.append(
             f"  Last Video ({last.get('slug')}): {last.get('aspect_ratio')} • {last.get('duration_s')}s • "
-            f"opened with `{last.get('opening_layout')}` • palettes={last.get('motion_palettes')} "
-            "(vary opening layout & lead palette on next edit!)"
+            f"opened=`{last.get('opening_layout')}` • accent={last.get('accent')}/{last.get('accent_secondary')} • "
+            f"bg={last.get('studio_bg')}/{last.get('paper_bg')} • fonts={last.get('fonts')}"
+        )
+        lines.append(
+            "  ANTI-CLONE DIRECTIVE: Do NOT repeat the last video's accent hexes, backdrops, font pairing, "
+            "opening layout, or motion metaphors unless explicitly locked in Durable Creator Rules!"
         )
     return "\n".join(lines)
 
@@ -174,7 +175,7 @@ def main():
     ap.add_argument("--lang", help="Set default language code (e.g., pt-BR, en, es, auto)")
     ap.add_argument("--niche", help="Set channel niche/theme summary")
     ap.add_argument("--captions", choices=["on", "off"], help="Set default captions preference")
-    ap.add_argument("--accent", help="Set preferred brand accent hex color")
+    ap.add_argument("--accent", help="Lock/clear brand accent hex color (pass 'auto' or '' to unlock)")
     ap.add_argument("--entity", action="append", default=[], help="Register recurring person/brand/channel entity")
     ap.add_argument("--record-project", help="Record completed project storyboard metadata")
     args = ap.parse_args()
@@ -194,8 +195,9 @@ def main():
     if args.captions:
         mem["profile"]["captions_default"] = args.captions == "on"
         changed = True
-    if args.accent:
-        mem["profile"]["accent_color"] = args.accent.strip()[:16]
+    if args.accent is not None:
+        val = args.accent.strip()
+        mem["profile"]["accent_color"] = "" if val.lower() in ("", "auto", "none", "chameleon") else val[:16]
         changed = True
     if args.forget:
         needle = args.forget.strip().lower()

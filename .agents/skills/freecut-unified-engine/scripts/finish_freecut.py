@@ -59,7 +59,10 @@ def main():
         sys.exit(f"[finish_freecut] ERROR: storyboard.json not found in {proj}")
 
     if os.path.isfile(LOTTIE_SCRIPT):
-        _run_step("Step 1/4: Batch Lottie Overlays", [sys.executable, "-B", LOTTIE_SCRIPT, "--project-dir", proj])
+        l_cmd = [sys.executable, "-B", LOTTIE_SCRIPT, "--project-dir", proj]
+        if args.force_motion:
+            l_cmd.append("--force")
+        _run_step("Step 1/5: Batch Lottie Overlays", l_cmd)
 
     if os.path.isfile(MOTION_SCRIPT):
         m_cmd = [sys.executable, "-B", MOTION_SCRIPT, "--project-dir", proj, "--workers", str(args.workers)]

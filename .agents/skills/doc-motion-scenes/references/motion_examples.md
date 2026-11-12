@@ -1,152 +1,112 @@
-# Motion Graphics Scene Templates (`doc-motion-scenes` v7.0)
+# Creative Bespoke Motion Architecture Guide (`v8.0`)
 
-Every `<project_dir>/motion/SXX.html` must expose deterministic frame stepping via `window.__setFrame = function(frameIdx, fps) { ... }`, load `world-atlas.js` + `motion-kit.js` (note: from `<agent_root>/projects/<slug>/motion/SXX.html`, the kit path is `../../../.agents/skills/doc-motion-scenes/kit/`), and **animate continuously until `t == duration`** (pass `time: t, duration: DUR` so `78% -> 94%` never freezes).
-
-## Anti-Cloning Rules (`v7.0` Hard Gates)
-1. **Never clone `#080C14` dark navy slides**: Rotate across `MotionKit.PALETTES` (`warm_archive_paper`, `editorial_blush_ivory`, `swiss_emerald_ivory`, `newsprint_crimson_ink`, `terracotta_ochre_sand`, `cobalt_blueprint`, `plum_velvet_editorial`, `charcoal_gold_ledger`). At least **50% of motion scenes** in a video must use light/warm/colored palettes.
-2. **Never repeat the same `motion_family` back-to-back**: Choose from the 10 engines below so consecutive motion scenes have completely different spatial choreography.
-3. **Cap right-side subject cutouts in motion scenes at `<= 20%`**: Let the typography, 3D UI, camera journey, map, dossier desk, or network graph be the hero — do NOT paste `#subject` on the right of every chart!
+> **Golden Rule:** These snippets show **how `window.__setFrame(frameIdx, fps)` and `MotionKit` physics work** — they are **NOT** templates to copy verbatim! Every `motion/SXX.html` must invent its own visual world, SVG geometry, layout, and choreography around the spoken sentence and the project's `style_dna`.
 
 ---
 
-## 1. Geodesic Atlas (`MotionKit.renderWorldAtlas` — `projection: 'naturalEarth'`)
-```javascript
-MotionKit.renderWorldAtlas(document.getElementById('atlas-svg'), {
-  width: 1920, height: 1080,
-  projection: 'naturalEarth',
-  fitBounds: [[-85, -36], [18, 45]],
-  padding: 0.16,
-  oceanFill: '#0B1E38', landFill: '#163256', landStroke: 'rgba(147,197,253,0.24)',
-  focusCountries: [
-    { iso: 'USA', fill: '#38BDF8', stroke: '#E0F2FE', fillOpacity: 0.85 },
-    { iso: 'BRA', fill: '#FACC15', stroke: '#FEF9C3', fillOpacity: 0.90, progress: p },
-  ],
-  routes: [{ from: [-74.17, 40.73], to: [-49.26, -16.68], progress: routeP, color: '#FACC15', width: 4.5 }],
-  pins: [
-    { coords: [-74.17, 40.73], label: 'Danbury, EUA', sublabel: 'ORIGEM', color: '#38BDF8', labelSide: 'left' },
-    { coords: [-49.26, -16.68], label: 'Goiânia, GO', sublabel: 'POLO DIGITAL', color: '#FACC15', labelSide: 'right', progress: p },
-  ],
-});
+## 1. Minimal Deterministic Scene Skeleton (Custom SVG + CSS + `MotionKit` Physics)
+
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@600&display=swap" />
+  <style>
+    /* Always derive CSS variables from storyboard.json -> style_dna! */
+    :root {
+      --bg: #FFF8E7;
+      --ink: #141824;
+      --accent: #FF2A5F;
+      --accent-2: #FFD60A;
+      --font-head: 'Space Grotesk', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-head);
+    }
+    #camera {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: 50% 50%;
+      will-change: transform;
+    }
+  </style>
+</head>
+<body>
+  <div id="camera">
+    <svg id="stage" viewBox="0 0 1920 1080" width="1920" height="1080"></svg>
+  </div>
+
+  <script src="../../../.agents/skills/doc-motion-scenes/kit/motion-kit.js"></script>
+  <script>
+    const DURATION = 5.4; // Match scene (end_ms - start_ms) / 1000
+    const cam = document.getElementById('camera');
+    const stage = document.getElementById('stage');
+    MotionKit.injectFilmGrain(0.03);
+
+    // Build custom bespoke SVG/DOM elements once at load time...
+    const trail = MotionKit.svgEl('path', {
+      d: 'M 220 760 C 620 260, 1240 880, 1680 340',
+      fill: 'none',
+      stroke: 'var(--accent)',
+      'stroke-width': 8,
+      'stroke-linecap': 'round'
+    }, stage);
+    const runner = MotionKit.svgEl('circle', { r: 22, fill: 'var(--accent-2)', stroke: 'var(--ink)', 'stroke-width': 5 }, stage);
+
+    window.__setFrame = function (frameIdx, fps) {
+      const t = frameIdx / (fps || 30);
+
+      // 1. Continuous 2.5D camera drift across 0..DURATION (guarantees live 78% -> 94% tail!)
+      cam.style.transform = MotionKit.rostrumTransform(t, DURATION, {
+        scaleFrom: 0.98,
+        scaleTo: 1.035,
+        xFrom: -14,
+        xTo: 14,
+        yFrom: 6,
+        yTo: -6
+      });
+
+      // 2. Progressive curve draw + object riding the curve tangent
+      const pDraw = MotionKit.progress(t, 0.2, DURATION * 0.68, MotionKit.easeInOutCubic);
+      MotionKit.strokeProgress(trail, pDraw);
+      const pos = MotionKit.pointOnPath(trail, pDraw);
+      const bob = MotionKit.oscillate(t, 1.8, 7, 0);
+      runner.setAttribute('cx', pos.x.toFixed(1));
+      runner.setAttribute('cy', (pos.y + bob).toFixed(1));
+    };
+    window.__setFrame(0, 30);
+  </script>
+</body>
+</html>
 ```
 
-## 2. 3D Rotating Orthographic Globe (`MotionKit.renderWorldAtlas` — `projection: 'orthographic'`)
-```javascript
-MotionKit.renderWorldAtlas(document.getElementById('globe-svg'), {
-  width: 1920, height: 1080,
-  projection: 'orthographic',
-  center: [MotionKit.lerp(-46, 52, p), MotionKit.lerp(-14, 24, p)],
-  scale: 430 + Math.sin(t * 0.8) * 8,
-  oceanFill: '#EAE0CE', landFill: '#C8B89D', landStroke: 'rgba(24,20,17,0.22)',
-  focusCountries: [{ iso: 'BRA', fill: '#C84B31' }, { iso: 'ARE', fill: '#0F766E', progress: p }],
-  routes: [{ from: [-46.63, -23.55], to: [55.27, 25.20], progress: routeP, color: '#C84B31', width: 4.5 }],
-});
-```
+---
 
-## 3. Follow-Tip Editorial Data Curve (`MotionKit.renderDataCurve`)
-```javascript
-MotionKit.renderDataCurve(document.getElementById('curve-svg'), {
-  width: 1920, height: 1080,
-  palette: 'swiss_emerald_ivory',
-  followTip: true,
-  time: t,
-  progress: MotionKit.progress(t, 0.2, DUR * 0.72, MotionKit.easeInOutCubic),
-  plotBox: { x: 150, y: 270, width: 1620, height: 590 },
-  points: [
-    { label: '2021', value: 10, callout: 'R$ 10 MI' },
-    { label: '2022', value: 168, callout: 'R$ 168 MI' },
-    { label: '2023', value: 325, callout: 'R$ 325 MI' },
-    { label: '2024', value: 750, callout: 'R$ 750 MI' },
-  ],
-});
-```
+## 2. Four Creative Techniques to Mix & Invent Per Genre
 
-## 4. 2.5D Spatial Camera Journey (`MotionKit.renderCameraJourney`)
-```javascript
-MotionKit.renderCameraJourney(document.getElementById('stage'), {
-  palette: 'warm_archive_paper', time: t, duration: DUR,
-  kicker: 'LINHA DO TEMPO ESPACIAL', headline: 'Da Dança Caseira à Holding Bilionária',
-  stops: [
-    { x: 900, y: 780, year: '2016', tag: 'ORIGEM', stat: '100 MIL', title: 'Quarto em Governador Valadares', sub: 'Primeiros vídeos sem roteiro fixo', zoom: 1.18 },
-    { x: 1750, y: 1080, year: '2020', tag: 'ESCALA', stat: '10 MILHÕES', title: 'Mudança para Londrina e Goiânia', sub: 'Lives diárias viram hábito nacional', zoom: 1.15 },
-    { x: 2620, y: 760, year: '2021', tag: 'VIRADA', stat: 'WEPINK', title: 'De Publi para Sócia Majoritária', sub: ' Audiência convertida em estoque próprio', zoom: 1.18 },
-  ],
-});
-```
+1. **Bespoke Illustrated Object / Prop Choreography (SVG + Spring Physics):**
+   - Draw recognizable stylized props in clean vector geometry (e.g., rattling doors/windows, gauges, scales, bottles, arcade machines, retro CRT frames, Hourglasses, vaults, rockets, musical waveforms, lab flasks, stadium scoreboards).
+   - Drive impacts with `MotionKit.spring(t - hitTime, { stiffness: 260, damping: 14 })` and continuous secondary motion with `MotionKit.oscillate(t, freq, amp, phase)`.
+2. **Canvas2D Procedural Fields + Crisp HTML/SVG Foreground:**
+   - Layer a `<canvas width="1920" height="1080">` behind an `<svg>` or HTML typography stage to draw shockwave rings, confetti/coins, radar sweeps, starfields, acoustic spectrum bars, fluid waves, or grid deformations computed purely from `t` and `MotionKit.hashNoise(i)`.
+3. **Expressive Kinetic Typography & Spatial Diagrams:**
+   - Break away from tiny left-aligned card headers! Use oversized cropped background numerals, circular rotating SVG `<textPath>` seals, stepped diagonal words, or split duotone stages whose colors come straight from `style_dna`.
+4. **Real Geodesic Cartography (When the Narration Names Real Countries/Routes):**
+   - Load `kit/world-atlas.js` + `kit/motion-kit.js` and call `MotionKit.renderWorldAtlas(svgEl, { projection: 'orthographic' | 'naturalEarth', rotate: [lon, lat], oceanFill, landFill, accent, focusCountries, routes, pins })`, animating `rotate` or `routes[i].progress` smoothly with `t`.
 
-## 5. Mechanical Odometer & Contrast Ledger (`MotionKit.renderOdometerCounter`)
-```javascript
-MotionKit.renderOdometerCounter(document.getElementById('stage'), {
-  palette: 'charcoal_gold_ledger', time: t, duration: DUR,
-  kicker: 'BALANÇO AUDITADO • 2024',
-  headline: 'Faturamento Bruto Anual Declarado',
-  prefix: 'R$', targetValue: 750, suffix: 'MILHÕES',
-  contrastLabel: 'Índice de Resolução Inicial vs Volume de Queixas (Reclame Aqui / Procon)',
-  contrastValue: '90 MIL QUEIXAS', contrastRatio: 0.14,
-});
-```
+---
 
-## 6. 3D Perspective Social UI Feed (`MotionKit.renderUIFeed3D`)
-```javascript
-MotionKit.renderUIFeed3D(document.getElementById('stage'), {
-  palette: 'editorial_blush_ivory', time: t, duration: DUR,
-  kicker: 'ENGENHARIA DE RETENÇÃO',
-  headline: 'A Novela Real de 24 Horas',
-  subheadline: 'Dezenas de micro-episódios diários transformam rotina doméstica em vitrine contínua.',
-  screenImage: '../media/images/S17.jpg',
-  liveStart: 280000, livePeak: 920000,
-  metrics: [{ value: '50M+', label: 'Seguidores' }, { value: '900K', label: 'Pico em Live' }],
-});
-```
+## 3. Anti-Clone Checklist Before Rendering
 
-## 7. Tactile Overhead Investigative Dossier Desk (`MotionKit.renderDossierDesk`)
-```javascript
-MotionKit.renderDossierDesk(document.getElementById('stage'), {
-  palette: 'newsprint_crimson_ink', time: t, duration: DUR,
-  kicker: 'MINISTÉRIO PÚBLICO & PROCON-GO', docNumber: 'ACP • 2025/GO',
-  headline: 'Autuação por Atrasos, Reembolsos e Vícios em Lives',
-  clauses: [
-    { tag: 'CLÁUSULA 01', text: 'Mais de 90 mil reclamações registradas em 12 meses de operação.', highlight: true },
-    { tag: 'CLÁUSULA 02', text: 'Indenização por danos morais coletivos fixada em R$ 5 milhões.', highlight: true },
-    { tag: 'CLÁUSULA 03', text: 'Proibição de novas lives promocionais sem estoque comprovado.', highlight: false },
-  ],
-  stampText: 'MULTA R$ 5 MI',
-});
-```
-
-## 8. Directed Network & Cash-Flow Graph (`MotionKit.renderNetworkGraph`)
-```javascript
-MotionKit.renderNetworkGraph(document.getElementById('net-svg'), {
-  palette: 'terracotta_ochre_sand', time: t, duration: DUR,
-  kicker: 'ARQUITETURA DE AFILIAÇÃO', headline: 'Como o Tráfego dos Stories Alimenta as Plataformas',
-  nodes: [
-    { id: 'stories', x: 340, y: 560, label: 'Stories Diários', sub: '50M Seguidores' },
-    { id: 'link', x: 960, y: 380, label: 'Link de Cadastro', sub: 'Comissão / CPA + RevShare', primary: true },
-    { id: 'plataforma', x: 1580, y: 560, label: 'Operadoras de Bets', sub: 'Volume Bilionário' },
-    { id: 'holding', x: 960, y: 780, label: 'Cachês Publicitários', sub: 'Contratos Milionários' },
-  ],
-  edges: [
-    { from: 'stories', to: 'link', label: 'CLIQUE DIRETO', accent: true, curve: 65 },
-    { from: 'link', to: 'plataforma', label: 'DEPÓSITO PIX', accent: true, curve: 65 },
-    { from: 'plataforma', to: 'holding', label: 'REPASSE CONTRATUAL', accent: false, curve: -65 },
-  ],
-});
-```
-
-## 9. Diagonal Versus Split (`MotionKit.renderVersusSplit`)
-```javascript
-MotionKit.renderVersusSplit(document.getElementById('stage'), {
-  palette: 'plum_velvet_editorial', time: t, duration: DUR,
-  left: { kicker: 'IMAGEM PÚBLICA', title: 'Família, Fé e Carisma Popular', stat: '53 MILHÕES', sub: 'Maior vitrine digital do país' },
-  right: { kicker: 'ESCRUTÍNIO NO SENADO', title: 'CPI das Bets em Brasília', stat: 'MAIO • 2025', sub: 'Questionamentos sobre contratos e publicidade' },
-});
-```
-
-## 10. Proportional 100-Block Waffle Matrix (`MotionKit.renderWaffleScale`)
-```javascript
-MotionKit.renderWaffleScale(document.getElementById('waffle-svg'), {
-  palette: 'swiss_emerald_ivory', time: t, duration: DUR,
-  kicker: 'DIMENSÃO DEMOGRÁFICA', headline: '1 Influenciadora =\n1/4 do Brasil Conectado',
-  bigStat: '53 MILHÕES', subheadline: 'Audiência superior à população inteira da Colômbia ou Espanha.',
-  highlightCount: 78,
-});
-```
+- **Different Skeleton Every Scene:** If `S03.html` is a split portal, `S06.html` might be a full-scene architectural shockwave illustration, `S11.html` a central object with bezier particle trails, and `S18.html` an isometric/grid stamp counter. Never copy-paste one `SXX.html` into the next and only swap text!
+- **Safe Margins (`16:9` -> `>= 96px` horizontal, `>= 80px` vertical; `9:16` -> `top >= 240px`, `bottom >= 360px`):** Keep all key text and badges inside `MotionKit.safeZone(W, H)` with `overflow: visible` on internal labels so nothing clips.
+- **Zero Domain Leakage:** Every single string, number, badge, and label in `motion/SXX.html` must come 100% from the current video's transcript and story.

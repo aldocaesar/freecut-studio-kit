@@ -1,28 +1,72 @@
 ---
-name: "doc-motion-scenes"
-description: "Builds bespoke 30fps Motion Graphics scenes (15%-25% of video, v7.0) with 10 distinct MotionKit engines, 8 light and dark editorial palettes, 4-frame dead-tail detection (20/50/78/94%), offline 242-country GeoJSON maps, and parallel ThreadPoolExecutor rendering."
+name: doc-motion-scenes
+description: Design and render bespoke, one-of-a-kind 30fps HTML/CSS/SVG/Canvas2D/GIS motion graphics clips for FreeCut (v8.0). Zero canned slide templates or fixed palettes — every MOTION_SCENE is creatively invented from scratch by the LLM to embody the spoken metaphor, genre, and style_dna of the current video.
 ---
 
-# Documentary & Editorial Motion Scenes (`doc-motion-scenes` v7.0)
+# Bespoke Creative LLM Motion Graphics (`doc-motion-scenes` v8.0)
 
-Creates **15% to 25%** of the video's runtime as bespoke, deterministic 30fps H.264 clips (`<project_dir>/motion/SXX.mp4`) placed on FreeCut's `track_anchor`.
+Use `MOTION_SCENE` (`motion/<scene_id>.html` -> `motion/<scene_id>.mp4`) whenever the narration presents a **mechanism, physical/visual metaphor, spatial transformation, contrast, timeline, quantitative jump, or geographic route** that custom vector/canvas choreography expresses better than stock B-roll.
 
-Read `<SKILL_DIR>/references/motion_examples.md` once for copy-ready patterns of all **10 `MotionKit` v7.0 engines** and **8 chapter palettes** (never `read_file` `.py`/`.js` kit source files!).
+## 1. Core Philosophy: Zero Canned Widgets — Invent the Scene Around the Metaphor!
+
+**Canned slide renderers (`renderUIFeed3D`, `renderDossierDesk`, `renderOdometerCounter`, `renderVersusSplit`, `renderWaffleScale`, `renderCameraJourney`, `renderNetworkGraph`, `renderDataCurve`, `renderKineticManifesto`) and fixed `PALETTES` do NOT exist (`validate_freecut.py` hard-fails if any deprecated widget name or cloned HTML skeleton is used!).**
+
+Instead, for every `MOTION_SCENE`:
+1. **Start from the exact physical or narrative metaphor of the spoken sentence:**
+   - Talking about a loud 6:00 AM alarm shaking a neighborhood? Illustrate & animate architectural courtyard windows rattling on `MotionKit.spring(...)` shockwaves with expanding sound rings!
+   - Talking about an absurd luxury perfume made of ham? Draw a custom SVG glass flacon spraying golden bezier vapor trails (`MotionKit.strokeProgress` + `MotionKit.pointOnPath`) toward its target!
+   - Talking about compounding debt, servers overloading, cells dividing, historic treaties, or arcade power-ups? Build the **actual visual object, diagram, instrument, or stage** in crisp SVG / Canvas2D / CSS 3D — never a generic 2-column dark dashboard card!
+2. **Inherit 100% of Colors & Typography from `storyboard.json -> style_dna`:**
+   - Load the project's exact Google Fonts (`font_display`, `font_serif`, `font_body`, `font_mono`) via `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?...">`.
+   - Alternate light, vivid, pastel, warm, or deep backgrounds derived from `style_dna` (`paper_bg`, `studio_bg`, `accent`, `accent_secondary`) so consecutive motion scenes within the same video feel cohesive yet visually distinct — and two different videos NEVER look alike!
+3. **Never Clone Structure Within or Across Videos:**
+   - `validate_freecut.py` computes pairwise structural AST/DOM similarity across `motion/*.html` and **FAILS** if two scenes share `> 84%` structural skeleton. Give each motion scene its own spatial composition (radial, diagonal, isometric, split-stage, full-bleed SVG illustration, Canvas particle field, instrument dial, architectural elevation, or Natural Earth map).
+   - Keep `media/cutouts/*.png` inside `motion/*.html` to **at most 25% of motion scenes** (prefer pure illustrated vector/canvas/typography craft).
 
 ---
 
-## Hard v7.0 Anti-Cloning, Palette Diversity & Live-Tail Rules
-1. **10 DISTINCT ENGINES (Zero Consecutive Clones!)**: Rotate across `MotionKit.renderWorldAtlas` (`naturalEarth` map), `MotionKit.renderWorldAtlas` (`orthographic` 3D rotating globe), `MotionKit.renderCameraJourney` (Vox 2.5D spatial desk), `MotionKit.renderDataCurve` (`followTip` camera curve), `MotionKit.renderOdometerCounter` (mechanical rolling digits + contrast bar), `MotionKit.renderUIFeed3D` (3D tilted glass phone + live story bars + floating notifications), `MotionKit.renderDossierDesk` (overhead paper dossier + red rubber stamp slam), `MotionKit.renderNetworkGraph` (directed cash-flow conduits with streaming packets), `MotionKit.renderVersusSplit` (diagonal razor split), and `MotionKit.renderWaffleScale` (100-block proportional matrix).
-2. **8 EDITORIAL CHAPTER PALETTES (`>= 50%` Light / Warm / Colored!)**: Never default every scene to `#080C14` dark navy! Rotate `MotionKit.PALETTES` — `warm_archive_paper`, `editorial_blush_ivory`, `swiss_emerald_ivory`, `newsprint_crimson_ink`, `terracotta_ochre_sand`, `cobalt_blueprint`, `plum_velvet_editorial`, and `charcoal_gold_ledger`.
-3. **CAP CUTOUTS IN MOTION AT `<= 20%`**: Do NOT paste a right-side `#subject` cutout onto every motion scene (`validate_freecut.py` v7.0 fails if `> 25%` of motions contain cutouts!). Let the 3D UI, map, camera journey, dossier desk, or odometer be the visual protagonist.
-4. **CONTINUOUS ANIMATION TO `100%` (`78% -> 94%` Live-Tail Check)**: Pass `time` (`frameIdx / fps`) and `duration` into every `MotionKit` engine so camera drift, particles, story bars, or globe rotation stay alive until the final frame (`render_motion_scene.py` flags static tails!).
-5. **REAL GEODESIC MAPS ONLY & SUBAGENT QA**: Always load `kit/world-atlas.js` + `kit/motion-kit.js` (relative path `../../../.agents/skills/doc-motion-scenes/kit/` from `projects/<slug>/motion/SXX.html`). Delegate inspection of the 4-column `motion/motion_contact_sheet.jpg` (`20% / 50% / 78% / 94%`) to an isolated subagent (`invoke_subagent`).
+## 2. Deterministic Frame Contract & `MotionKit` v8.0 Primitives
+
+Every `motion/<ID>.html` file is rendered frame-by-frame at `30fps` in headless Chromium via `window.__setFrame(frameIdx, fps)`.
+
+- **NEVER** rely on wall-clock `requestAnimationFrame`, `setInterval`, or unpaused CSS `@keyframes` — compute 100% of transforms, SVG attributes, and canvas draws deterministically from `const t = frameIdx / fps;`.
+- Include `<script src="<ABS_OR_REL_PATH_TO>/kit/motion-kit.js"></script>` (plus `kit/world-atlas.js` **only** when rendering real geographic country maps).
+
+### Available Pure Primitives in `window.MotionKit`
+- **Math & Easing:** `clamp01(v)`, `clamp(v, min, max)`, `lerp(a, b, t)`, `remap(v, in0, in1, out0, out1)`, `easeOutQuint(t)`, `easeInOutCubic(t)`, `easeInOutSine(t)`, `easeOutExpo(t)`, `easeOutBack(t, overshoot)`
+- **Deterministic Physics & Choreography:**
+  - `MotionKit.spring(t - startSec, { stiffness: 180, damping: 18, mass: 1 })` — physical spring with natural settle/bounce
+  - `MotionKit.progress(t, startSec, durSec, easeFn)` — normalized `[0..1]` window
+  - `MotionKit.stagger(t, index, baseStart, stepSec, durSec, easeFn)` — staggered element entrances
+  - `MotionKit.oscillate(t, freqHz, amplitude, phaseRad)` — continuous harmonic motion
+  - `MotionKit.hashNoise(seed)` — deterministic `[0..1)` pseudo-random number for particles/textures
+- **SVG, Camera & Framing:**
+  - `MotionKit.strokeProgress(svgPathEl, p)` — progressive line/curve drawing (`0..1`)
+  - `MotionKit.pointOnPath(svgPathEl, p)` — returns `{ x, y, angle }` along any `<path>` for moving icons, particles, or labels along curves!
+  - `MotionKit.rostrumTransform(t, DURATION, { scaleFrom: 0.97, scaleTo: 1.04, xFrom: -12, xTo: 12 })` — continuous 2.5D camera glide
+  - `MotionKit.safeZone(width, height)` & `MotionKit.injectFilmGrain(0.035)` & `MotionKit.svgEl(tag, attrs, parent)`
+- **Real 242-Country Cartography (ONLY when a real geographic map is needed):**
+  - `MotionKit.renderWorldAtlas(svgEl, { projection: 'naturalEarth' | 'orthographic' | 'mercator', center, fitBounds, oceanFill, landFill, accent, focusCountries, routes, pins })` — never hand-draw country polygons!
 
 ---
 
-## Scene Contract & Parallel Rendering CLI
-Every `<project_dir>/motion/SXX.html` must define `window.__setFrame = function(frameIdx, fps)`. Run via `finish_freecut.py --project-dir "<project_dir>" --force-motion` or standalone:
+## 3. Mandatory 3-Act Choreography & Live Tail (`78% -> 94%` Never Frozen!)
 
+`render_motion_scene.py` samples every scene at **`20%`, `50%`, `78%`, and `94%`** and checks pixel delta between `78%` and `94%`:
+1. **Act I (`0%–25%`):** Stage architecture enters with staggered `spring()` / `easeOutBack()` / `strokeProgress()`.
+2. **Act II (`25%–75%`):** Primary visual transformation, counter/gauge climb, path traversal (`pointOnPath`), collision, or reveal synced to the spoken beat.
+3. **Act III (`75%–100%` — Mandatory Live Tail):** Keep continuous `t`-driven motion running until the very last frame (`rostrumTransform` camera glide + `oscillate(t, ...)` floating badges/particles/waves/ripples/dials) so the clip never freezes before the cut!
+
+See [references/motion_examples.md](references/motion_examples.md) for minimal structural patterns (SVG path physics, Canvas2D + SVG hybrids, kinetic instruments, and GIS maps).
+
+---
+
+## 4. Parallel Render & Isolated Visual QA
+
+Render all motion scenes in parallel (`3` workers) + build `motion/motion_contact_sheet.jpg`:
 ```bash
-python -B "<SKILL_DIR>/scripts/render_motion_scene.py" --project-dir "<project_dir>" --workers 3 --force
+python -B "<SKILL_DIR>/scripts/render_motion_scene.py" --project-dir "<PROJECT_DIR>" --workers 3
 ```
+*(Or run `finish_freecut.py --project-dir "<PROJECT_DIR>"` to chain Lottie + Motion + Assembly + Validation in one command.)*
+
+**Strict Context Rule:** Never open `motion/motion_contact_sheet*.jpg` in the main agent context — delegate visual inspection to an isolated subagent (`invoke_subagent`) checking legibility, clipping, metaphor clarity, and live motion across `20% / 50% / 78% / 94%`.

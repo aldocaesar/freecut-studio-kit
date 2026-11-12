@@ -1,8 +1,8 @@
-# `storyboard.json` v6.3 Full Schema & Creative Examples (`doc-art-director`)
+# `storyboard.json` v8.0 Schema & Genre-Adaptive Examples (`doc-art-director`)
 
-Every project edited by `Editor-FreeCut` writes `<project_dir>/storyboard.json` anchored to millisecond word timestamps from `<project_dir>/words.json`.
+Every project writes `<project_dir>/storyboard.json` anchored to exact timestamps from `<project_dir>/words_compact.txt`. Notice how `style_dna` (`accent`, `accent_secondary`, `paper_bg`, `studio_bg`, and all 4 Google Fonts) changes completely to fit the genre!
 
-## Root & Scene Example (`16:9` Documentary / Essay)
+## Root & Scene Example
 
 ```json
 {
@@ -12,14 +12,15 @@ Every project edited by `Editor-FreeCut` writes `<project_dir>/storyboard.json` 
   "audio_file": "narration.mp3",
   "captions": { "enabled": false },
   "style_dna": {
-    "palette": "investigative_amber",
-    "font_display": "Bricolage Grotesque",
-    "font_serif": "Playfair Display",
-    "font_body": "Space Grotesk",
-    "font_mono": "Roboto Mono",
-    "accent": "#EA580C",
-    "paper_bg": "#F3EFE6",
-    "studio_bg": "#0D121A"
+    "mood": "genre_specific_visual_world",
+    "font_display": "Syne",
+    "font_serif": "Instrument Serif",
+    "font_body": "Plus Jakarta Sans",
+    "font_mono": "JetBrains Mono",
+    "accent": "#2563EB",
+    "accent_secondary": "#F59E0B",
+    "paper_bg": "#F8F6F0",
+    "studio_bg": "#0F172A"
   },
   "scenes": [
     {
@@ -27,25 +28,16 @@ Every project edited by `Editor-FreeCut` writes `<project_dir>/storyboard.json` 
       "type": "SCENE",
       "layout": "cinematic_broll",
       "start_ms": 0,
-      "end_ms": 4800,
-      "anchor_word": "Kigali",
-      "narration": "Exact spoken slice from words.json...",
-      "headline": "KIGALI, RUANDA",
+      "end_ms": 4600,
+      "anchor_word": "abertura",
+      "narration": "Spoken slice from words_compact.txt...",
+      "headline": "Um Novo Universo Visual",
       "text_position": "bottom_left",
       "text_entry": "slide-mask",
       "media": {
         "source_type": "video",
-        "specific": true,
-        "queries": ["Kigali Rwanda street market cityscape 4k", "Kigali Rwanda aerial"],
-        "must_match": ["kigali"]
-      },
-      "lottie_overlay": {
-        "file": "lottie/S01_lt.json",
-        "x": -450,
-        "y": 385,
-        "width": 760,
-        "height": 150,
-        "offset_frames": 5
+        "specific": false,
+        "queries": ["aerial city lights dusk timelapse", "modern skyline twilight drone"]
       }
     },
     {
@@ -54,79 +46,51 @@ Every project edited by `Editor-FreeCut` writes `<project_dir>/storyboard.json` 
       "layout": "parallax_cutout_stage",
       "cutout": true,
       "cutout_variant": "poster_monumental_center",
-      "start_ms": 4800,
-      "end_ms": 9600,
-      "anchor_word": "garrafa",
-      "narration": "Exact spoken slice...",
-      "hero_stat": "1 9 5 7",
-      "headline": "FANTA CITRON • BRALIRWA RUANDA",
-      "text_entry": "typewriter",
+      "subject_side": "center",
+      "monumental_word": "ORIGEM",
+      "start_ms": 4600,
+      "end_ms": 9200,
+      "anchor_word": "personagem",
+      "narration": "Spoken slice...",
+      "kicker": "PROTAGONISTA",
+      "headline": "Quem mudou as regras do jogo",
       "media": {
         "source_type": "image",
         "specific": true,
-        "queries": ["Fanta Citron glass bottle Bralirwa Rwanda", "Bralirwa Fanta Citron returnable bottle"],
-        "must_match": ["citron", "bottle"],
-        "exclude_terms": ["canette", "frappe", "can", "orange", "strawberry"]
+        "queries": ["Named Person official portrait photo"],
+        "must_match": ["person"]
       }
     },
     {
-      "id": "S05",
-      "type": "SCENE",
-      "layout": "parallax_cutout_stage",
-      "cutout": true,
-      "cutout_variant": "archival_dossier_paper",
-      "start_ms": 18200,
-      "end_ms": 23400,
-      "anchor_word": "maracuja",
-      "narration": "Exact spoken slice...",
-      "hero_stat": "AGASHYA • SINA GERARD",
-      "headline": "O néctar artesanal que virou símbolo nacional",
-      "text_entry": "cascade",
-      "media": {
-        "source_type": "image",
-        "specific": true,
-        "queries": ["Agashya passion fruit bottle Sina Gerard Rwanda"],
-        "must_match": ["agashya"]
-      }
-    },
-    {
-      "id": "S07",
+      "id": "S03",
       "type": "MOTION_SCENE",
       "layout": "motion_scene",
-      "start_ms": 28400,
-      "end_ms": 35100,
-      "narration": "Exact spoken slice...",
-      "motion_html": "motion/S07.html",
-      "motion_brief": "Natural Earth geodesic atlas comparing Brazil (-14,-51) and Rwanda (29.9,-1.9) across the Equator with real S02_cutout.png."
+      "start_ms": 9200,
+      "end_ms": 14800,
+      "narration": "Spoken slice...",
+      "motion_html": "motion/S03.html",
+      "motion_brief": "Custom SVG/Canvas physical metaphor tailored to this exact sentence, styled with style_dna (#2563EB, #F59E0B, #F8F6F0, Syne + JetBrains Mono) and continuous live motion through 100%."
     },
     {
-      "id": "S08",
+      "id": "S04",
       "type": "SCENE",
-      "layout": "parallax_cutout_stage",
-      "cutout": true,
-      "cutout_variant": "magazine_grounded_portrait",
-      "start_ms": 35100,
-      "end_ms": 40500,
-      "anchor_word": "bilhao",
-      "narration": "Exact spoken slice...",
-      "hero_stat": "R$ 750 MILHÕES",
-      "headline": "O salto do cosmético digital no Brasil",
-      "text_entry": "rise",
+      "layout": "full_bleed_ken_burns",
+      "silent_visual": true,
+      "start_ms": 14800,
+      "end_ms": 19100,
+      "narration": "Spoken slice...",
       "media": {
         "source_type": "image",
-        "specific": true,
-        "queries": ["Virginia Fonseca WePink portrait"],
-        "must_match": ["virginia"]
+        "specific": false,
+        "queries": ["sunlit courtyard architecture wide shot", "warm street afternoon shadows"]
       }
     }
   ]
 }
 ```
 
-## Autonomous Audio-Only Creative Checklist
-When the user sends **only an audio file** (without scene instructions):
-1. Infer tone, theme, and target aspect ratio (`16:9` default unless vertical/Shorts/Reels is requested or implied).
-2. Never repeat two identical layouts back-to-back.
-3. Rotate cutout scenes across `poster_monumental_center`, `archival_dossier_paper`, and `magazine_grounded_portrait`.
-4. Include `15%–25%` bespoke 30fps `motion_scene` clips (`MotionKit.renderWorldAtlas` for geography, `MotionKit.renderDataCurve` for numbers/growth, kinetic timelines for history).
-5. Pair editorial typography (`Playfair Display`, `Bricolage Grotesque`, `Space Grotesk`, `Bebas Neue`, `Oswald`, `Inter Tight`, `Roboto Mono`) with native FreeCut `textMotion` (`typewriter`, `slide-mask`, `cascade`, `rise`, `pop`, `blur-in`) and `motionModifiers` (`float-drift`, `sway`, `breath-pulse`).
+## Autonomous Audio-Only Creative Checklist (`v8.0`)
+1. **Check `creator_memory.py --summary`:** Contrast `style_dna` colors, Google Fonts, and `S01` opening layout against `Last Video` so back-to-back projects never look cloned.
+2. **Respect Genre:** Zero `press_evidence_highlight` or investigative brackets on comedy, entertainment, pop culture, or fictional stories.
+3. **Optional `monumental_word` & `kicker`:** Use `monumental_word` sparingly (`1–2` hero cutouts max per minute), never on every single cutout.
+4. **Bespoke Creative LLM Motion (`15%–25%` of runtime):** Invent each `motion/SXX.html` around the spoken metaphor using custom SVG/Canvas2D/CSS + `MotionKit` physics (`spring`, `progress`, `stagger`, `strokeProgress`, `pointOnPath`, `oscillate`, `rostrumTransform`, and `renderWorldAtlas` for real geography).

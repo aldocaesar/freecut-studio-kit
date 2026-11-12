@@ -1,31 +1,34 @@
 ---
 name: "doc-lottie-overlays"
-description: "Generates sleek, <15 KB transparent Bodymovin/Lottie (.json) vector overlays in batch from storyboard.json (--project-dir) onto FreeCut track_fg_3 synced to spoken words, enforcing v7.0 anti-spam rotation across brackets, ink underlines, arrows, circles, and OCR-aligned highlights."
+description: "Generates sleek, <15 KB transparent Bodymovin/Lottie (.json) vector overlays in batch from storyboard.json (--project-dir) onto FreeCut track_fg_3 synced to spoken words, styled from style_dna and matched strictly to the video's genre (v8.0)."
 ---
 
-# Editorial Lottie Vector Overlays (`doc-lottie-overlays` v7.0)
+# Genre-Matched Lottie Vector Overlays (`doc-lottie-overlays` v8.0)
 
-Generates ultra-lightweight (`< 15 KB`) transparent Bodymovin `.json` vector animations placed on `track_fg_3` (`type` `"lottie"`).
+Generates ultra-lightweight (`< 15 KB`) transparent Bodymovin `.json` vector animations placed on `track_fg_3` (`type` `"lottie"`), inheriting colors directly from `storyboard.json -> style_dna` (`accent` & `accent_secondary`).
 
-## Zero-Bloat Batch Workflow & v7.0 Anti-Spam Rules
-1. Do **NOT** run `generate_lottie.py` 20+ separate times in the shell! Declare `lottie_overlay` (`file`, `kind`, `x`, `y`, `width`, `height`, `offset_frames`) on selective scenes inside `storyboard.json` — `finish_freecut.py` generates all `.json` files in `< 0.2s` in one call!
-2. **NO YELLOW HIGHLIGHTER SPAM (`<= 2` per 10 minutes!)**: Never put `marker_highlight` on every news clip! `assemble_freecut.py` v7.0 automatically rotates 5 press treatments (`tilted_3d_push`, `dossier_focus_brackets`, `pull_quote_editorial`, `headline_underline_ink`, and RapidOCR-aligned `ocr_marker_highlight` capped at `<= 2` per 10 min).
+## Genre Discipline & Anti-Spam Rules
+1. **Batch Only:** Declare `lottie_overlay` (`file`, `kind`, `x`, `y`, `width`, `height`, `offset_frames`) on selective scenes (`15%–30%` of scenes — never spam every clip!) inside `storyboard.json`. `finish_freecut.py` builds all `.json` files in `< 0.2s`.
+2. **Match Overlay to Genre (Zero Investigative Vices in Entertainment/Comedy!):**
+   - **Comedy / Pop / Gaming / Creator / Lifestyle:** Use `spark_burst`, `pointer_arrow`, `handdrawn_circle`, or `handdrawn_underline`. **NEVER** put investigative `focus_corner_brackets`, `pulse_beacon`, or `marker_highlight` on humor/fiction/pop crossover videos!
+   - **Journalism / Investigation / Documentary:** Rotate `focus_corner_brackets`, `handdrawn_underline`, `minimal_lower_third`, `pointer_arrow`, and `marker_highlight` (`<= 2` yellow markers per 10 min!).
+   - **Geography / Telemetry / Science:** Use `pulse_beacon` or `pointer_arrow` ONLY on real coordinates, maps, or technical diagrams.
 
 ## Available Presets (`kind`)
 
-| `kind` | Purpose | Recommended Placement (`16:9` center-origin) |
+| `kind` | Genre Fit & Purpose | Typical Size (`16:9` center-origin) |
 |---|---|---|
-| `focus_corner_brackets` | Crisp investigative viewfinder brackets locking onto evidence or subjects | Around headline/subject (`width` 720, `height` 180) |
-| `handdrawn_underline` | Organic cubic-bezier ink underline sweeping under key numbers or headlines | Beneath headline/stat (`width` 640, `height` 95) |
-| `pointer_arrow` | Curved editorial callout arrow pointing at a detail | Near target (`width` 360, `height` 220) |
-| `minimal_lower_third` | Vertical accent pillar + subtle dark glass lower-third rule | Varied left/right safe zones (`width` 760, `height` 150) |
-| `handdrawn_circle` | Organic ink ring drawing around visual evidence | Around detail (`width` 440, `height` 440) |
-| `pulse_beacon` | Cartographic / telemetry sonar ring | On map target (`width` 240, `height` 240) |
-| `marker_highlight` | Translucent yellow marker sweep (**strictly `<= 2` per 10-min video!**) | RapidOCR-aligned over key headline (`#FACC15`) |
+| `spark_burst` | Radial 8-ray starburst pop for punchlines, pop culture, milestones, reveals | `width` 280, `height` 280 |
+| `pointer_arrow` | Curved callout arrow pointing at a character, prop, or detail | `width` 360, `height` 220 |
+| `handdrawn_underline` | Organic cubic-bezier stroke sweeping under a key number or title | `width` 620, `height` 95 |
+| `handdrawn_circle` | Organic ring drawing around a detail on screen | `width` 420, `height` 420 |
+| `minimal_lower_third` | Clean accent pillar + subtle rule | `width` 760, `height` 150 |
+| `focus_corner_brackets` | *Journalism/Investigation only:* viewfinder brackets on evidence | `width` 720, `height` 180 |
+| `pulse_beacon` | *Maps/Telemetry only:* sonar ring on real geographic target | `width` 240, `height` 240 |
+| `marker_highlight` | *Press proof only (`<= 2` per 10 min):* RapidOCR-aligned `#FACC15` sweep | Over headline |
 
 ## Batch CLI Usage
 
 ```bash
 python -B "<SKILL_DIR>/scripts/generate_lottie.py" --project-dir "<project_dir>"
 ```
-*(Single-file mode `--kind <preset> --duration 4.0 --out "<file.json>"` also remains supported.)*
