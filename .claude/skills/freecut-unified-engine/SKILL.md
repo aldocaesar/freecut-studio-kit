@@ -30,13 +30,17 @@ curl.exe -fsSL "https://github.com/aldocaesar/freecut-studio-kit/archive/refs/he
 ```bash
 curl -fsSL "https://github.com/aldocaesar/freecut-studio-kit/archive/refs/heads/main.zip" -o .freecut-kit.zip && unzip -qo .freecut-kit.zip -d .freecut-kit && mkdir -p .agents/skills .claude/skills && cp -R .freecut-kit/freecut-studio-kit-main/.agents/skills/* .agents/skills/ && cp -R .freecut-kit/freecut-studio-kit-main/.claude/skills/* .claude/skills/ && for f in AGENTS.md CLAUDE.md install.ps1 install.sh doctor.py requirements.txt .env.example .gitignore; do test -f "$f" || cp ".freecut-kit/freecut-studio-kit-main/$f" "$f"; done && rm -rf .freecut-kit .freecut-kit.zip
 ```
-2. **If `<WORKSPACE>/.freecut-setup-done.json` is missing (First-Time Use Detection)**:
+2. **If the user pastes or sends an API key directly in chat (even on their very 1st message!)**:
+   - **In OpenBot**: Save it immediately with `openbot.save_api_key(name="PIXABAY_API_KEY", key="<pasted_value>", notes="Pixabay HD stock video & photo API")` (use exact uppercase env name: `PIXABAY_API_KEY`, `GROQ_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`, `TMDB_API_KEY`, or `PEXELS_API_KEY`; **never** repeat the key in chat or write it into `.env` without asking!). `_runtime_env.py` automatically loads saved OpenBot Vault keys into RAM on every future script run across Windows, macOS, and Linux.
+   - **Outside OpenBot (Claude Code / Antigravity / Cursor CLI)**: Write `PIXABAY_API_KEY=<value>` directly into gitignored `<WORKSPACE>/.env` without echoing the secret.
+   - Then immediately run `python -B "<SKILL_DIR>/scripts/bootstrap_env.py" --mark-onboarded` in the same turn (installing any missing virgin-PC packages and marking `.freecut-setup-done.json` **without** asking the onboarding question again!). If the message had **only** the key, confirm in 2 short lines that the key is saved and the engine is ready for their audio; if they sent **key + audio together**, proceed straight into Step 1 and edit the video in the same turn!
+3. **Otherwise, if `<WORKSPACE>/.freecut-setup-done.json` is missing (First-Time Use without a pasted key)**:
    - Run `install.ps1` / `install.sh` (if Python 3 is missing), then `python -B "<SKILL_DIR>/scripts/bootstrap_env.py"`.
-   - Ask **once** (`openbot.ask_user` in OpenBot, or 1 concise question in CLI) whether the user wants:
-     - **(Recommended) Add FREE `PIXABAY_API_KEY`** (instant free signup at `https://pixabay.com/api/docs/` covering 1080p HD stock videos + photos, since Pexels paused new API keys; optional `GROQ_API_KEY` / `ELEVENLABS_API_KEY` / legacy `PEXELS_API_KEY` also supported via `openbot.request_api_key` + `--vault-key <NAME> "<vault_path>"` or `.env`), OR
+   - Check `openbot.list_api_keys` first; if `PIXABAY_API_KEY` is not saved yet, ask **once** (`openbot.ask_user` in OpenBot, or 1 concise question in CLI) whether the user wants:
+     - **(Recommended) Add FREE `PIXABAY_API_KEY`** (instant free signup at `https://pixabay.com/api/docs/` covering 1080p HD stock videos + photos, since Pexels paused new API keys; use `openbot.request_api_key(name="PIXABAY_API_KEY", ...)`), OR
      - **Run 100% Free Zero-Key now** (multi-engine HD web scraping + local `faster-whisper`).
    - Run `python -B "<SKILL_DIR>/scripts/bootstrap_env.py" --mark-onboarded` so all future runs skip onboarding and start editing immediately!
-3. **Recall & Persist Creator Context Memory (`creator_memory.py`)**:
+4. **Recall & Persist Creator Context Memory (`creator_memory.py`)**:
    - Before planning any video, run `python -B "<SKILL_DIR>/scripts/creator_memory.py" --summary` (plus `openbot.search_memories` in OpenBot) to load the creator's default aspect ratio, channel niche, durable feedback rules, recurring entities, and last edit's opening/palettes.
    - Whenever the user gives style feedback or channel preferences (e.g., *"sempre 9:16"*, *"mais paletas claras"*, *"sem legenda"*), persist it immediately via:
 ```bash

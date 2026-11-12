@@ -1,25 +1,38 @@
 #!/usr/bin/env python3
 """
-_runtime_env.py — Cross-Platform Runtime PATH & Vault Key Helper (v6.3)
-=======================================================================
+_runtime_env.py — Cross-Platform Runtime PATH & OpenBot Vault Key Helper (v7.2)
+===============================================================================
 1. Automatically discovers newly installed binaries (`ffmpeg`, `ffprobe`, `node`, `npm`, `git`)
    across Windows (`WinGet\\Links`, `WinGet\\Packages`, live Registry `Path`), macOS Apple Silicon
    (`/opt/homebrew/bin`, `/usr/local/bin`), and Linux (`/usr/local/bin`, `/snap/bin`, `~/.local/bin`)
    so OpenBot never requires an app restart after first-run `winget` / `brew` installation.
 2. Ensures Python user-site (`site.getusersitepackages()`) is importable when `pip install --user`
    was used on non-admin machines.
-3. Supports `--vault-key <VAR_NAME> <VAULT_FILE_PATH>` (repeatable) across all CLI scripts, loading
-   keys from OpenBot's encrypted vault files directly into process memory without printing values
-   or writing secrets to `.env`.
+3. Automatically loads FreeCut's optional accelerator keys (`PIXABAY_API_KEY`, `GROQ_API_KEY`,
+   `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `TMDB_API_KEY`, `PEXELS_API_KEY`)
+   into process RAM from `<WORKSPACE>/.env` AND OpenBot's API-Key Vault (`agent-api-keys/.vault/` and
+   `agent-api-keys/<agent-id>/` on Windows, macOS, and Linux) without printing or copying secrets.
+   Also supports explicit `--vault-key <VAR_NAME> <VAULT_FILE_PATH>` CLI overrides.
 """
 import glob
 import os
+import re
 import site
 import sys
 
 # Prevent Python from writing __pycache__/*.pyc inside .agents/skills/ so OpenBot Share stays clean ("installed")
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
+KNOWN_FREECUT_KEYS = (
+    "PIXABAY_API_KEY",
+    "PEXELS_API_KEY",
+    "TMDB_API_KEY",
+    "GROQ_API_KEY",
+    "ASSEMBLYAI_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "ELEVENLABS_VOICE_ID",
+)
 
 
 def ensure_user_site():
@@ -102,6 +115,72 @@ def ensure_runtime_paths():
         os.environ["PATH"] = cur_path + (os.pathsep if cur_path else "") + os.pathsep.join(to_add)
 
 
+def _openbot_key_dirs(script_dir: str) -> list:
+    dirs = []
+    custom = os.environ.get("OPENBOT_VAULT_DIR", "").strip()
+    if custom:
+        dirs.append(custom)
+
+    bases = []
+    appdata = os.environ.get("APPDATA", "").strip()
+    if appdata:
+        bases.append(os.path.join(appdata, "OpenBot", "agent-api-keys"))
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        bases.append(os.path.join(home, "Library", "Application Support", "OpenBot", "agent-api-keys"))
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg:
+        bases.append(os.path.join(xdg, "OpenBot", "agent-api-keys"))
+    bases.append(os.path.join(home, ".config", "OpenBot", "agent-api-keys"))
+
+    m = re.search(r"[\\/]Agents[\\/](agent-[0-9a-fA-F-]+)(?:[\\/]|$)", script_dir)
+    agent_id = m.group(1) if m else ""
+
+    for b in bases:
+        if agent_id:
+            dirs.append(os.path.join(b, agent_id))
+        dirs.append(os.path.join(b, ".vault"))
+    return dirs
+
+
+def autoload_known_keys():
+    here = os.path.dirname(os.path.abspath(__file__))
+    ws_root = os.path.abspath(os.path.join(here, "..", "..", "..", ".."))
+    env_candidates = [
+        os.path.join(ws_root, ".env"),
+        os.path.join(os.getcwd(), ".env"),
+    ]
+    for env_p in env_candidates:
+        if os.path.isfile(env_p):
+            try:
+                with open(env_p, "r", encoding="utf-8", errors="ignore") as fh:
+                    for line in fh:
+                        ln = line.strip()
+                        if ln and not ln.startswith("#") and "=" in ln:
+                            k, v = ln.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k in KNOWN_FREECUT_KEYS and v and not os.environ.get(k):
+                                os.environ[k] = v
+            except Exception:
+                pass
+
+    for vd in _openbot_key_dirs(here):
+        if os.path.isdir(vd):
+            for k in KNOWN_FREECUT_KEYS:
+                if os.environ.get(k):
+                    continue
+                kp = os.path.join(vd, k)
+                if os.path.isfile(kp):
+                    try:
+                        with open(kp, "r", encoding="utf-8", errors="ignore") as fh:
+                            val = fh.read().strip()
+                        if val:
+                            os.environ[k] = val
+                    except Exception:
+                        pass
+
+
 def apply_vault_key_args():
     argv = sys.argv
     cleaned = [argv[0]]
@@ -125,4 +204,5 @@ def apply_vault_key_args():
 
 def init():
     ensure_runtime_paths()
+    autoload_known_keys()
     apply_vault_key_args()
